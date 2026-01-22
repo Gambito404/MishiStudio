@@ -10,25 +10,9 @@ Catálogo interactivo de productos personalizados: pins, stickers, llaveros y m�
 - 💬 **Integración WhatsApp** - Realiza tu pedido directamente
 - 📱 **Responsive** - Compatible con todos los dispositivos
 - 🎨 **Diseño moderno** - Interfaz elegante y fluida
-
-## 🛍️ Productos disponibles
-
-### Pins personalizados
-- Pines de 45mm - Clásicos y versátiles
-- Pines de 25mm - Para eventos y promociones
-- Pins cuadrados - Diseño moderno
-- Pins premium - Material reforzado
-
-### Stickers
-- Sticker circular - Ideal para branding
-- Sticker cuadrado - Corte preciso
-- Sticker troquelado - Forma personalizada
-- Sticker vinil - Resistente al agua
-- Sticker transparente - Acabado profesional
-
-### Llaveros
-- Acrílicos personalizados
-- Diseños únicos y exclusivos
+- ⚡ **Progressive Web App (PWA)** - Accesible sin conexión
+- 💾 **Caché inteligente** - Carga rápida y eficiente
+- 📲 **Instalable en dispositivos** - Acceso directo desde tu pantalla de inicio
 
 ## 🚀 Cómo comprar
 
