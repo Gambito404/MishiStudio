@@ -1,5 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // 1. Inyectar librería de Partículas (Diferida para mejorar LCP)
+  // Inyectar librería de Partículas
   const loadParticles = () => {
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js";
@@ -46,14 +46,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.appendChild(script);
   };
 
-  // Cargar partículas solo después de que el sitio sea interactivo
   if (document.readyState === "complete") {
     setTimeout(loadParticles, 1500);
   } else {
     window.addEventListener("load", () => setTimeout(loadParticles, 1500));
   }
 
-  // 2. Inyectar HTML de Componentes (Lightbox, Carrito FAB, Modales)
+  // Inyectar HTML de Componentes
   const componentsHtml = `
     <!-- LIGHTBOX -->
     <div class="lightbox-overlay" id="lightbox">
@@ -120,7 +119,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.body.insertAdjacentHTML("beforeend", componentsHtml);
 
   /* ===== LÓGICA DEL CARRITO ===== */
-  // 1. Cargar carrito desde LocalStorage
   let cart = JSON.parse(localStorage.getItem("mishiCart")) || [];
 
   const cartFab = document.getElementById("cartFab");
@@ -130,7 +128,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const closeCartBtn = document.getElementById("closeCart");
   const checkoutBtn = document.getElementById("checkoutBtn");
 
-  // Función para guardar en LocalStorage
   const saveCart = () => {
     localStorage.setItem("mishiCart", JSON.stringify(cart));
     updateCartUI();
@@ -146,10 +143,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  // Actualizar UI al cargar la página
   updateCartUI();
 
-  // Función para mostrar detalle del item del carrito
   const showItemDetail = (item) => {
     const detailModal = document.getElementById("itemDetailModal");
     const closeDetail = document.getElementById("closeDetail");
@@ -226,7 +221,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("cartTotal").innerHTML =
       `Total: <strong>${totalText}</strong>`;
 
-    // Eventos eliminar
     document.querySelectorAll(".cart-remove").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const idx = parseInt(e.target.dataset.index);
@@ -294,7 +288,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const updateLightboxImage = () => {
     lightboxImg.src = lbImages[lbIndex];
     lightboxImg.alt = "Imagen ampliada " + (lbIndex + 1);
-    // Mostrar/ocultar flechas si solo hay 1 imagen
     lbPrev.style.display = lbImages.length > 1 ? "block" : "none";
     lbNext.style.display = lbImages.length > 1 ? "block" : "none";
   };
@@ -316,7 +309,6 @@ document.addEventListener("DOMContentLoaded", () => {
     updateLightboxImage();
   });
 
-  // Elementos del Modal
   const modal = document.getElementById("quoteModal");
   const closeBtn = modal.querySelector(".modal-close");
   const addToCartBtn = document.getElementById("addToCartBtn");
@@ -325,7 +317,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const optionsContainer = document.getElementById("modalOptions");
   let currentProduct = null;
 
-  // Funciones del Modal
   const closeModal = () => {
     modal.classList.remove("active");
     customInput.style.display = "none";
@@ -338,7 +329,6 @@ document.addEventListener("DOMContentLoaded", () => {
       `Cotizar: ${product.name}`;
     optionsContainer.innerHTML = "";
 
-    // Generar opciones de precio existentes
     if (product.prices) {
       product.prices.forEach((p, index) => {
         const id = `opt-${index}`;
@@ -354,20 +344,17 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    // Seleccionar primera opción por defecto
     const firstOpt = optionsContainer.querySelector("input");
     if (firstOpt) firstOpt.checked = true;
 
     modal.classList.add("active");
   };
 
-  // Event Listeners del Modal
   closeBtn.addEventListener("click", closeModal);
   modal.addEventListener("click", (e) => {
     if (e.target === modal) closeModal();
   });
 
-  // Mostrar input solo si selecciona "Otra cantidad"
   optionsContainer.addEventListener("change", () => {
     customInput.style.display = "none";
   });
@@ -376,7 +363,6 @@ document.addEventListener("DOMContentLoaded", () => {
     customInput.focus();
   });
 
-  // Función auxiliar para obtener datos seleccionados
   const getSelectedOption = () => {
     if (!currentProduct) return;
     const selected = document.querySelector(
@@ -402,7 +388,22 @@ document.addEventListener("DOMContentLoaded", () => {
     return result;
   };
 
-  // Agregar al Carrito
+  const showToast = (message) => {
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.innerHTML = `✅ ${message}`;
+    document.body.appendChild(toast);
+
+    // Forzar reflow para la animación
+    toast.offsetHeight; 
+    toast.classList.add("show");
+
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.remove(), 400);
+    }, 3000);
+  };
+
   addToCartBtn.addEventListener("click", () => {
     const option = getSelectedOption();
     if (!option) return;
@@ -411,11 +412,9 @@ document.addEventListener("DOMContentLoaded", () => {
       currentProduct.images ||
       (currentProduct.image ? [currentProduct.image] : []);
 
-    // Calcular ahorro para mostrar en el carrito
     let originalPrice = 0;
     let saving = 0;
 
-    // Si no es cotización personalizada, intentamos calcular el ahorro
     if (option.price > 0 && currentProduct.prices) {
       const selectedIdx = document.querySelector(
         'input[name="priceOption"]:checked',
@@ -439,15 +438,15 @@ document.addEventListener("DOMContentLoaded", () => {
       saving: saving,
     });
 
-    saveCart(); // Guardar en LocalStorage
+    saveCart();
     closeModal();
 
-    // Pequeña animación visual en el FAB
     cartFab.style.transform = "scale(1.3)";
     setTimeout(() => (cartFab.style.transform = "scale(1)"), 200);
+    showToast(`¡${currentProduct.name} agregado al carrito!`);
   });
 
-  // 2. Actualizar Nombre de Marca
+  // Actualizar Nombre de Marca
   const brand = document.querySelector(".nav-brand");
   if (brand) {
     brand.innerHTML = `
@@ -461,7 +460,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (!container || !navLinks) return;
 
-  // Lógica del Menú Móvil
+  /* ===== LÓGICA DEL MENÚ MÓVIL ===== */
   const navbar = document.querySelector(".navbar");
   if (navbar) {
     const toggleBtn = document.createElement("button");
@@ -474,16 +473,14 @@ document.addEventListener("DOMContentLoaded", () => {
       toggleBtn.innerHTML = navLinks.classList.contains("active") ? "✕" : "☰";
     });
 
-    // Efecto de Scroll en Navbar
     window.addEventListener("scroll", () => {
       navbar.classList.toggle("scrolled", window.scrollY > 50);
     });
 
-    // Insertar botón antes de la lista de enlaces
     navbar.insertBefore(toggleBtn, navLinks);
   }
 
-  let globalImageCounter = 0; // Para controlar la prioridad de carga (LCP)
+  let globalImageCounter = 0;
 
   catalog.forEach((section) => {
     /* ===== NAVBAR ===== */
@@ -492,7 +489,6 @@ document.addEventListener("DOMContentLoaded", () => {
     link.href = `#${section.id}`;
     link.textContent = section.title;
 
-    // Cerrar menú al hacer click (Móvil)
     link.addEventListener("click", () => {
       navLinks.classList.remove("active");
       const toggleBtn = document.querySelector(".menu-toggle");
@@ -521,11 +517,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const card = document.createElement("article");
       card.className = "product-card fade-in-up";
 
-      // Lógica de Imágenes (Soporte para múltiples)
       const images = item.images || (item.image ? [item.image] : []);
       const mainImage = images.length > 0 ? images[0] : "";
 
-      // Controles y Badge
       const controlsHtml =
         images.length > 1
           ? `
@@ -538,23 +532,18 @@ document.addEventListener("DOMContentLoaded", () => {
           ? `<div class="image-badge">1 / ${images.length}</div>`
           : "";
 
-      // Optimización LCP y SEO:
-      // Las primeras 4 imágenes de la página cargan rápido, el resto lazy
       const isLCP = globalImageCounter < 4;
       const loadingAttr = isLCP ? 'loading="eager"' : 'loading="lazy"';
       const priorityAttr = isLCP ? 'fetchpriority="high"' : '';
       globalImageCounter++;
 
-      // Lógica de Precios y Ahorro
       const pricesList = item.prices || [];
-      // Encontrar precio unitario base (cantidad 1) para calcular ahorros
       const unitPriceObj = pricesList.find((p) => p.quantity === 1);
       const unitPrice = unitPriceObj ? unitPriceObj.price : 0;
 
       const pricesHtml = pricesList
         .map((p) => {
           let savingHtml = "";
-          // Calcular ahorro si no es la unidad y tenemos precio base
           if (unitPrice > 0 && p.quantity > 1) {
             const expectedPrice = unitPrice * p.quantity;
             const saving = expectedPrice - p.price;
@@ -592,12 +581,10 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       `;
 
-      // Conectar botón Cotizar con el Modal
       const contactBtn = card.querySelector(".btn-contact");
       contactBtn.addEventListener("click", () => openModal(item));
 
-      // Agregar funcionalidad al slider si hay múltiples imágenes
-      let currentIndex = 0; // Estado local para el slider/lightbox
+      let currentIndex = 0;
 
       if (images.length > 1) {
         const imgEl = card.querySelector("img.card-image");
@@ -621,7 +608,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
 
-      // Conectar Lightbox (Click en imagen)
       const imgContainer = card.querySelector(".card-image");
       imgContainer.addEventListener("click", () => {
         openLightbox(images, currentIndex);
@@ -631,6 +617,52 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     container.appendChild(sectionEl);
+  });
+
+  /* ===== BOTÓN DE INSTALACIÓN PWA ===== */
+  let deferredPrompt;
+  const installLi = document.createElement("li");
+  const installBtn = document.createElement("a");
+  installBtn.href = "#";
+  installBtn.innerHTML = "📲 INSTALAR APP";
+  installBtn.style.color = "#4cd137"; // Verde brillante para destacar
+  installBtn.style.fontWeight = "800";
+  installLi.style.display = "none";
+  installLi.appendChild(installBtn);
+  navLinks.appendChild(installLi);
+
+  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+    installLi.style.display = "none";
+  }
+
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installLi.style.display = "block";
+    console.log("✅ PWA lista para instalar");
+  });
+
+  installBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult) => {
+        installLi.style.display = "none";
+        deferredPrompt = null; 
+      });
+    } else if (isIos) {
+      alert("Para instalar en iPhone/iPad:\n1. Toca el botón 'Compartir' (cuadrado con flecha hacia arriba) en la barra inferior.\n2. Busca y selecciona la opción 'Agregar al inicio'.");
+    } else {
+      alert("⚠️ Error de PWA detectado:\nTu imagen 'logo.webp' no tiene el tamaño correcto.\n\nSolución:\nUsa una imagen cuadrada exacta (ej. 512x512) o el navegador bloqueará la instalación.");
+    }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installLi.style.display = "none";
+    deferredPrompt = null;
+    console.log("✅ App instalada correctamente");
   });
 
   // Observer para animaciones al hacer scroll
@@ -644,12 +676,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (entry.isIntersecting) {
         entry.target.classList.add('is-visible');
         
-        // Si es una tarjeta, activar la flotación después de la animación de entrada
         if (entry.target.classList.contains('product-card')) {
           setTimeout(() => {
-            entry.target.classList.remove('fade-in-up', 'is-visible'); // Limpiar clases para no interferir con hover
+            entry.target.classList.remove('fade-in-up', 'is-visible');
             entry.target.classList.add('floating');
-          }, 800); // Esperar a que termine la transición de 0.8s
+          }, 800);
         }
       }
     });
@@ -663,7 +694,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const spyOptions = {
     root: null,
-    rootMargin: "-30% 0px -70% 0px", // Detecta cuando la sección está en la parte superior
+    rootMargin: "-30% 0px -70% 0px",
     threshold: 0
   };
 
