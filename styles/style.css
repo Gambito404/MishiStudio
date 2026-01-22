@@ -126,9 +126,14 @@ body {
   width: 100%;
 }
 
-.nav-links a:hover {
+.nav-links a:hover,
+.nav-links a.active {
   color: var(--accent);
   text-shadow: 0 0 15px rgba(238, 159, 196, 0.8);
+}
+
+.nav-links a.active::after {
+  width: 100%;
 }
 
 /* ===== MENU MOVIL (HAMBURGUESA) ===== */
@@ -164,9 +169,15 @@ body {
 }
 
 /* ===== SECCIONES ===== */
+/* Corrección: Empujamos todo el catálogo hacia abajo para librar el navbar fijo */
+#catalog {
+  padding-top: 140px;
+  min-height: 100vh; /* Evita que el footer salte antes de cargar productos (Mejora CLS) */
+}
+
 .catalog-section {
-  padding: 60px 8%;
-  scroll-margin-top: 150px;
+  padding: 25px 8% 60px;
+  scroll-margin-top: 110px;
 }
 
 .section-header {
@@ -184,7 +195,7 @@ body {
   position: relative;
   display: inline-block;
   margin-bottom: 15px;
-  margin-top: 40px;
+  margin-top: 0;
   border: none;
   text-transform: uppercase;
   letter-spacing: 2px;
@@ -480,8 +491,8 @@ footer {
     top: 100%;
     left: 0;
     width: 100%;
-    background: var(--dark);
-    backdrop-filter: none;
+    background: rgba(15, 12, 41, 0.95);
+    backdrop-filter: blur(15px);
     flex-direction: column;
     align-items: center;
     gap: 25px;
@@ -489,7 +500,7 @@ footer {
     max-height: 0;
     overflow: hidden;
     transition: all 0.4s ease-in-out;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(238, 159, 196, 0.3);
   }
 
   .nav-links.active {
@@ -505,6 +516,10 @@ footer {
   .section-header h2 {
     font-size: 2rem;
     margin-top: 20px;
+  }
+
+  #catalog {
+    padding-top: 100px;
   }
 }
 
@@ -666,6 +681,7 @@ footer {
 .lightbox-img {
   max-width: 100%;
   max-height: 85vh;
+  height: auto;
   border-radius: 8px;
   box-shadow: 0 0 50px rgba(255,255,255,0.1);
 }

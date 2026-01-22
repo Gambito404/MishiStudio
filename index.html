@@ -8,7 +8,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Preload Logo (Mejora LCP) -->
+  <link rel="preload" as="image" href="images/logo.webp">
+  <!-- Fuentes No Bloqueantes -->
+  <link rel="preload" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap"></noscript>
   <link rel="stylesheet" href="styles/style.css">
 </head>
 
@@ -24,8 +28,8 @@
     <p>Catálogo digital · 2026</p>
   </footer>
 
-  <script src="scripts/data.js"></script>
-  <script src="scripts/app.js"></script>
+  <script src="scripts/data.js" defer></script>
+  <script src="scripts/app.js" defer></script>
 </body>
 
 </html>

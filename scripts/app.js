@@ -60,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="lightbox-content">
         <button class="lightbox-close">&times;</button>
         <button class="lightbox-btn prev">❮</button>
-        <img src="" class="lightbox-img" id="lightboxImg" alt="Vista previa">
+        <img src="" class="lightbox-img" id="lightboxImg" alt="Vista previa" width="600" height="600">
         <button class="lightbox-btn next">❯</button>
       </div>
     </div>
@@ -111,7 +111,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="modal-content" style="text-align: center;">
         <button class="modal-close" id="closeDetail">&times;</button>
         <h3 class="modal-title" id="detailTitle"></h3>
-        <img src="" id="detailImage" style="max-width: 100%; border-radius: 10px; margin-bottom: 15px; object-fit: cover; max-height: 300px;" alt="Detalle del producto">
+        <img src="" id="detailImage" style="max-width: 100%; border-radius: 10px; margin-bottom: 15px; object-fit: cover; max-height: 300px;" alt="Detalle del producto" width="300" height="300">
         <p id="detailDesc" style="color: #666; margin-bottom: 10px;"></p>
         <p id="detailOption" style="font-weight: bold; color: var(--primary);"></p>
       </div>
@@ -488,7 +488,18 @@ document.addEventListener("DOMContentLoaded", () => {
   catalog.forEach((section) => {
     /* ===== NAVBAR ===== */
     const li = document.createElement("li");
-    li.innerHTML = `<a href="#${section.id}">${section.title}</a>`;
+    const link = document.createElement("a");
+    link.href = `#${section.id}`;
+    link.textContent = section.title;
+
+    // Cerrar menú al hacer click (Móvil)
+    link.addEventListener("click", () => {
+      navLinks.classList.remove("active");
+      const toggleBtn = document.querySelector(".menu-toggle");
+      if (toggleBtn) toggleBtn.innerHTML = "☰";
+    });
+
+    li.appendChild(link);
     navLinks.appendChild(li);
 
     /* ===== SECCIÓN ===== */
@@ -566,7 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       card.innerHTML = `
         <div class="card-image-container">
-          <img src="${mainImage}" class="card-image" alt="${item.name}" ${loadingAttr} ${priorityAttr} decoding="async">
+          <img src="${mainImage}" class="card-image" alt="${item.name}" width="280" height="220" ${loadingAttr} ${priorityAttr} decoding="async">
           ${controlsHtml}
           ${imageBadge}
         </div>
@@ -645,4 +656,27 @@ document.addEventListener("DOMContentLoaded", () => {
   }, observerOptions);
 
   document.querySelectorAll('.fade-in-up').forEach(el => observer.observe(el));
+
+  // Scroll Spy: Detectar sección activa
+  const sections = document.querySelectorAll("section.catalog-section");
+  const navItems = document.querySelectorAll(".nav-links a");
+
+  const spyOptions = {
+    root: null,
+    rootMargin: "-30% 0px -70% 0px", // Detecta cuando la sección está en la parte superior
+    threshold: 0
+  };
+
+  const spyObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        const id = entry.target.getAttribute("id");
+        navItems.forEach((link) => link.classList.remove("active"));
+        const activeLink = document.querySelector(`.nav-links a[href="#${id}"]`);
+        if (activeLink) activeLink.classList.add("active");
+      }
+    });
+  }, spyOptions);
+
+  sections.forEach((section) => spyObserver.observe(section));
 });
