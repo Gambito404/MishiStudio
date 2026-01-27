@@ -1,5 +1,70 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // Inyectar librería de Partículas
+  const loadingOverlay = document.getElementById('loading-overlay');
+  const mainContent = document.querySelector('main');
+  const footer = document.querySelector('footer');
+
+  if (mainContent) mainContent.style.opacity = 0;
+  if (footer) footer.style.opacity = 0;
+
+  const hideLoader = () => {
+    if (!loadingOverlay) return;
+    loadingOverlay.style.opacity = 0;
+    loadingOverlay.addEventListener('transitionend', () => {
+      loadingOverlay.remove();
+    }, { once: true });
+
+    if (mainContent) mainContent.style.transition = 'opacity 0.5s ease-in';
+    if (footer) footer.style.transition = 'opacity 0.5s ease-in';
+    if (mainContent) mainContent.style.opacity = 1;
+    if (footer) footer.style.opacity = 1;
+  };
+
+  const preloadResources = async () => {
+    const imageUrls = [];
+    if (typeof catalog !== 'undefined') {
+      catalog.forEach(section => {
+        section.items.forEach(item => {
+          if (item.image) imageUrls.push(item.image);
+          if (item.images) imageUrls.push(...item.images);
+        });
+      });
+    }
+
+    const totalResources = imageUrls.length;
+    if (totalResources === 0) {
+      hideLoader();
+      return;
+    }
+
+    let loadedCount = 0;
+    const progressCircle = document.querySelector('.loader-progress');
+    const circumference = progressCircle ? 2 * Math.PI * progressCircle.r.baseVal.value : 0;
+    
+    if (progressCircle) {
+      progressCircle.style.strokeDasharray = `${circumference} ${circumference}`;
+      progressCircle.style.strokeDashoffset = circumference;
+    }
+
+    const updateProgress = () => {
+      loadedCount++;
+      const progress = loadedCount / totalResources;
+      if (progressCircle) {
+        const offset = circumference * (1 - progress);
+        progressCircle.style.strokeDashoffset = offset;
+      }
+    };
+
+    const promises = imageUrls.map(url => new Promise(resolve => {
+      const img = new Image();
+      img.onload = img.onerror = () => { updateProgress(); resolve(); };
+      img.src = url;
+    }));
+
+    await Promise.all(promises);
+    setTimeout(hideLoader, 500);
+  };
+
+  /* ===== PARTICULAS ===== */
   const loadParticles = () => {
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js";
@@ -46,20 +111,29 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.appendChild(script);
   };
 
-  if (document.readyState === "complete") {
-    setTimeout(loadParticles, 1500);
-  } else {
-    window.addEventListener("load", () => setTimeout(loadParticles, 1500));
-  }
+  preloadResources().then(() => {
+    if (window.innerWidth > 768) {
+      setTimeout(loadParticles, 500);
+    }
 
-  // Inyectar HTML de Componentes
+    if (window.location.hash) {
+      const targetId = window.location.hash.substring(1);
+      setTimeout(() => {
+        const targetEl = document.getElementById(targetId);
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 500);
+    }
+  });
+
   const componentsHtml = `
     <!-- LIGHTBOX -->
     <div class="lightbox-overlay" id="lightbox">
       <div class="lightbox-content">
         <button class="lightbox-close">&times;</button>
         <button class="lightbox-btn prev">❮</button>
-        <img src="" class="lightbox-img" id="lightboxImg" alt="Vista previa" width="600" height="600">
+        <img src="" class="lightbox-img" id="lightboxImg" alt="Vista previa" width="1080" height="1080">
         <button class="lightbox-btn next">❯</button>
       </div>
     </div>
@@ -120,6 +194,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ===== LÓGICA DEL CARRITO ===== */
   let cart = JSON.parse(localStorage.getItem("mishiCart")) || [];
+  let favorites = JSON.parse(localStorage.getItem("mishiFavorites")) || [];
 
   const cartFab = document.getElementById("cartFab");
   const cartCount = document.getElementById("cartCount");
@@ -127,6 +202,56 @@ document.addEventListener("DOMContentLoaded", () => {
   const cartItemsContainer = document.getElementById("cartItems");
   const closeCartBtn = document.getElementById("closeCart");
   const checkoutBtn = document.getElementById("checkoutBtn");
+
+  const validateCartPrices = () => {
+    if (!cart.length || typeof catalog === 'undefined') return;
+    
+    let cartUpdated = false;
+
+    cart.forEach(item => {
+      let product = null;
+      for (const section of catalog) {
+        const found = section.items.find(p => p.name === item.name);
+        if (found) {
+          product = found;
+          break;
+        }
+      }
+
+      if (!product || !product.prices) return;
+
+      let currentPriceTier = null;
+
+      if (item.priceIndex !== undefined && item.priceIndex !== 'custom') {
+        currentPriceTier = product.prices[item.priceIndex];
+      } else if (!item.priceIndex && item.price > 0) {
+        const match = item.desc.match(/^(\d+)\s+Unidad/);
+        if (match) {
+          const qty = parseInt(match[1]);
+          currentPriceTier = product.prices.find(p => p.quantity === qty);
+        }
+      }
+
+      if (currentPriceTier) {
+        if (item.price !== currentPriceTier.price) {
+          item.price = currentPriceTier.price;
+          item.desc = `${currentPriceTier.quantity} ${currentPriceTier.quantity === 1 ? "Unidad" : "Unidades"} (${currentPriceTier.price} Bs)`;
+          
+          const unitPriceObj = product.prices.find(p => p.quantity === 1);
+          if (unitPriceObj && currentPriceTier.quantity > 1) {
+             item.originalPrice = unitPriceObj.price * currentPriceTier.quantity;
+             item.saving = item.originalPrice - currentPriceTier.price;
+          }
+          cartUpdated = true;
+        }
+      }
+    });
+
+    if (cartUpdated) {
+      saveCart();
+      showToast("⚠️ Precios del carrito actualizados");
+    }
+  };
 
   const saveCart = () => {
     localStorage.setItem("mishiCart", JSON.stringify(cart));
@@ -143,6 +268,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  validateCartPrices();
   updateCartUI();
 
   const showItemDetail = (item) => {
@@ -225,7 +351,7 @@ document.addEventListener("DOMContentLoaded", () => {
       btn.addEventListener("click", (e) => {
         const idx = parseInt(e.target.dataset.index);
         cart.splice(idx, 1);
-        saveCart(); // Guardar cambios
+        saveCart();
         renderCart();
       });
     });
@@ -249,7 +375,7 @@ document.addEventListener("DOMContentLoaded", () => {
       "Hola Mishi Studio 🐱, quiero realizar el siguiente pedido:\n\n";
 
     cart.forEach((item, i) => {
-      message += `- ${i + 1}. ${item.name} \n   Detalle: ${item.desc}\n`;
+      message += `- ${i + 1}. *${item.name}* \n   Detalle: ${item.desc}\n`;
       total += item.price || 0;
       if (!item.price) hasCustom = true;
     });
@@ -260,13 +386,13 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       totalText = `${total} Bs${hasCustom ? " + Cotización" : ""}`;
     }
-    message += `\nTotal Estimado: ${totalText}`;
+    message += `\n*Total Estimado: ${totalText}*`;
     message += "\nEspero su confirmación. ¡Gracias!";
 
     const url = `https://wa.me/59176904748?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
-    cart = []; // Limpiar carrito tras enviar
-    saveCart(); // Guardar carrito vacío
+    cart = [];
+    saveCart();
   });
 
   /* ===== LÓGICA LIGHTBOX ===== */
@@ -330,14 +456,28 @@ document.addEventListener("DOMContentLoaded", () => {
     optionsContainer.innerHTML = "";
 
     if (product.prices) {
+      const unitPriceObj = product.prices.find((p) => p.quantity === 1);
+      const unitPrice = unitPriceObj ? unitPriceObj.price : 0;
+
       product.prices.forEach((p, index) => {
         const id = `opt-${index}`;
+        let savingHtml = "";
+
+        if (unitPrice > 0 && p.quantity > 1) {
+          const expectedPrice = unitPrice * p.quantity;
+          const saving = expectedPrice - p.price;
+          if (saving > 0) {
+            savingHtml = `<span class="saving-tag" style="margin-left: 10px;">Ahorra ${parseFloat(saving.toFixed(2))} Bs</span>`;
+          }
+        }
+
         const html = `
           <label class="modal-option" for="${id}">
             <input type="radio" name="priceOption" id="${id}" value="${index}">
             <span>
               <strong>${p.quantity} ${p.quantity === 1 ? "Unidad" : "Unidades"}</strong> - ${p.price} Bs
             </span>
+            ${savingHtml}
           </label>
         `;
         optionsContainer.insertAdjacentHTML("beforeend", html);
@@ -414,9 +554,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let originalPrice = 0;
     let saving = 0;
+    let selectedIdx = 'custom';
 
     if (option.price > 0 && currentProduct.prices) {
-      const selectedIdx = document.querySelector(
+      selectedIdx = document.querySelector(
         'input[name="priceOption"]:checked',
       ).value;
       const priceData = currentProduct.prices[selectedIdx];
@@ -436,6 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
       fullDesc: currentProduct.description,
       originalPrice: originalPrice,
       saving: saving,
+      priceIndex: selectedIdx
     });
 
     saveCart();
@@ -446,7 +588,6 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast(`¡${currentProduct.name} agregado al carrito!`);
   });
 
-  // Actualizar Nombre de Marca
   const brand = document.querySelector(".nav-brand");
   if (brand) {
     brand.innerHTML = `
@@ -459,6 +600,101 @@ document.addEventListener("DOMContentLoaded", () => {
   const navLinks = document.getElementById("nav-links");
 
   if (!container || !navLinks) return;
+
+  /* ===== FILTRO DE PRODUCTOS (DROPDOWN) ===== */
+  let filterHtml = `
+    <div class="filter-container fade-in-up">
+      <div class="dropdown">
+        <button class="dropdown-btn" id="filterDropdownBtn">
+          Viendo: Todo <span>▼</span>
+        </button>
+        <div class="dropdown-content" id="filterDropdownContent">
+          <label class="filter-option">
+            <input type="checkbox" value="all" checked>
+            <span>Seleccionar Todos</span>
+          </label>
+  `;
+
+  if (typeof catalog !== 'undefined') {
+    catalog.forEach((section) => {
+      filterHtml += `
+        <label class="filter-option">
+          <input type="checkbox" value="${section.id}" checked>
+          <span>${section.title}</span>
+        </label>
+      `;
+    });
+  }
+  filterHtml += `</div></div></div>`;
+  container.insertAdjacentHTML("afterbegin", filterHtml);
+
+  const dropdownBtn = document.getElementById("filterDropdownBtn");
+  const dropdownContent = document.getElementById("filterDropdownContent");
+  const allCheckbox = container.querySelector('input[value="all"]');
+  const categoryCheckboxes = container.querySelectorAll('.filter-option input:not([value="all"])');
+
+  dropdownBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdownContent.classList.toggle("show");
+    dropdownBtn.classList.toggle("active");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
+      dropdownContent.classList.remove("show");
+      dropdownBtn.classList.remove("active");
+    }
+  });
+
+  const updateFilterState = () => {
+    const checkedBoxes = Array.from(categoryCheckboxes).filter(cb => cb.checked);
+    const isAllSelected = checkedBoxes.length === categoryCheckboxes.length;
+    
+    allCheckbox.checked = isAllSelected;
+
+    if (isAllSelected) {
+      dropdownBtn.innerHTML = 'Viendo: Todo <span>▼</span>';
+    } else if (checkedBoxes.length === 0) {
+      dropdownBtn.innerHTML = '⚠️ Selecciona una <span>▼</span>';
+    } else {
+      const names = checkedBoxes.map(cb => cb.nextElementSibling.textContent).join(', ');
+      dropdownBtn.innerHTML = `Viendo: ${names} <span>▼</span>`;
+    }
+
+    categoryCheckboxes.forEach(cb => {
+      const sectionId = cb.value;
+      const sectionEl = document.getElementById(sectionId);
+      const navLink = document.querySelector(`.nav-links a[href="#${sectionId}"]`);
+      const navLi = navLink ? navLink.parentElement : null;
+
+      if (cb.checked) {
+        if (sectionEl) sectionEl.style.display = "block";
+        if (navLi) navLi.style.display = "block";
+      } else {
+        if (sectionEl) sectionEl.style.display = "none";
+        if (navLi) navLi.style.display = "none";
+      }
+    });
+  };
+
+  allCheckbox.addEventListener('change', (e) => {
+    if (e.target.checked) {
+      categoryCheckboxes.forEach(cb => cb.checked = true);
+    } else {
+      e.target.checked = true;
+    }
+    updateFilterState();
+  });
+
+  categoryCheckboxes.forEach(cb => {
+    cb.addEventListener("change", (e) => {
+      const activeCount = Array.from(categoryCheckboxes).filter(c => c.checked).length;
+      if (activeCount === 0) {
+        e.target.checked = true;
+      }
+      updateFilterState();
+    });
+  });
 
   /* ===== LÓGICA DEL MENÚ MÓVIL ===== */
   const navbar = document.querySelector(".navbar");
@@ -473,9 +709,12 @@ document.addEventListener("DOMContentLoaded", () => {
       toggleBtn.innerHTML = navLinks.classList.contains("active") ? "✕" : "☰";
     });
 
-    window.addEventListener("scroll", () => {
-      navbar.classList.toggle("scrolled", window.scrollY > 50);
-    });
+    const onScroll = () => {
+      const scrollY = window.scrollY || document.body.scrollTop || document.documentElement.scrollTop;
+      navbar.classList.toggle("scrolled", scrollY > 50);
+    };
+    window.addEventListener("scroll", onScroll);
+    document.body.addEventListener("scroll", onScroll);
 
     navbar.insertBefore(toggleBtn, navLinks);
   }
@@ -515,7 +754,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     section.items.forEach((item) => {
       const card = document.createElement("article");
-      card.className = "product-card fade-in-up";
+      card.className = "product-card floating";
+      
+      const productId = item.name.toLowerCase().trim().replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
+      card.id = productId;
 
       const images = item.images || (item.image ? [item.image] : []);
       const mainImage = images.length > 0 ? images[0] : "";
@@ -531,6 +773,8 @@ document.addEventListener("DOMContentLoaded", () => {
         images.length > 1
           ? `<div class="image-badge">1 / ${images.length}</div>`
           : "";
+      
+      const isFav = favorites.includes(item.name);
 
       const isLCP = globalImageCounter < 4;
       const loadingAttr = isLCP ? 'loading="eager"' : 'loading="lazy"';
@@ -538,37 +782,46 @@ document.addEventListener("DOMContentLoaded", () => {
       globalImageCounter++;
 
       const pricesList = item.prices || [];
-      const unitPriceObj = pricesList.find((p) => p.quantity === 1);
-      const unitPrice = unitPriceObj ? unitPriceObj.price : 0;
 
-      const pricesHtml = pricesList
-        .map((p) => {
-          let savingHtml = "";
-          if (unitPrice > 0 && p.quantity > 1) {
-            const expectedPrice = unitPrice * p.quantity;
-            const saving = expectedPrice - p.price;
-            if (saving > 0) {
-              savingHtml = `<span class="saving-tag">Ahorra ${saving} Bs</span>`;
-            }
-          }
-
-          return `
-          <div class="price-row">
-            <span class="price-qty">${p.quantity} ${p.quantity === 1 ? "Unidad" : "Unidades"}</span>
-            <div class="price-details">
-              <span class="price-val">${p.price} Bs</span>
-              ${savingHtml}
-            </div>
-          </div>
-        `;
-        })
-        .join("");
+      const pricesHtml =
+        pricesList.length > 0
+          ? `
+        <table class="price-table">
+          <thead>
+            <tr>
+              <th>Cant.</th>
+              <th>P. Unit.</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pricesList
+              .map((p) => {
+                const unitVal = parseFloat((p.price / p.quantity).toFixed(2));
+                return `
+              <tr>
+                <td>${p.quantity}</td>
+                <td>${unitVal} Bs</td>
+                <td>${p.price} Bs</td>
+              </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      `
+          : "";
 
       card.innerHTML = `
         <div class="card-image-container">
           <img src="${mainImage}" class="card-image" alt="${item.name}" width="280" height="220" ${loadingAttr} ${priorityAttr} decoding="async">
           ${controlsHtml}
           ${imageBadge}
+          <button class="share-btn" aria-label="Compartir en WhatsApp">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/>
+            </svg>
+          </button>
+          <button class="fav-btn ${isFav ? 'active' : ''}" aria-label="Añadir a favoritos">♥</button>
         </div>
         <div class="card-body">
           <h3>${item.name}</h3>
@@ -580,6 +833,35 @@ document.addEventListener("DOMContentLoaded", () => {
           <button class="btn-contact">Cotizar</button>
         </div>
       `;
+
+      const shareBtn = card.querySelector(".share-btn");
+      shareBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        
+        const pageUrl = "https://gambito404.github.io/MishiStudio/"; 
+        const text = `Mira este producto de Mishi Studio: *${item.name}*\n${pageUrl}#${productId}`;
+        const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank');
+      });
+
+      const favBtn = card.querySelector(".fav-btn");
+      favBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const index = favorites.indexOf(item.name);
+        
+        if (index === -1) {
+          favorites.push(item.name);
+          favBtn.classList.add("active");
+          showToast(`❤️ ${item.name} guardado en favoritos`);
+        } else {
+          favorites.splice(index, 1);
+          favBtn.classList.remove("active");
+          showToast(`💔 ${item.name} eliminado de favoritos`);
+        }
+        localStorage.setItem("mishiFavorites", JSON.stringify(favorites));
+        updateFavBadge(true);
+        renderFavorites();
+      });
 
       const contactBtn = card.querySelector(".btn-contact");
       contactBtn.addEventListener("click", () => openModal(item));
@@ -593,16 +875,23 @@ document.addEventListener("DOMContentLoaded", () => {
         const nextBtn = card.querySelector(".next");
 
         const updateView = () => {
-          imgEl.src = images[currentIndex];
-          badgeEl.textContent = `${currentIndex + 1} / ${images.length}`;
+          imgEl.style.opacity = 0;
+
+          setTimeout(() => {
+            imgEl.src = images[currentIndex];
+            badgeEl.textContent = `${currentIndex + 1} / ${images.length}`;
+            imgEl.style.opacity = 1;
+          }, 300); 
         };
 
-        prevBtn.addEventListener("click", () => {
+        prevBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
           currentIndex = (currentIndex - 1 + images.length) % images.length;
           updateView();
         });
 
-        nextBtn.addEventListener("click", () => {
+        nextBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
           currentIndex = (currentIndex + 1) % images.length;
           updateView();
         });
@@ -619,6 +908,160 @@ document.addEventListener("DOMContentLoaded", () => {
     container.appendChild(sectionEl);
   });
 
+  /* ===== SECCIÓN FAVORITOS (NUEVA) ===== */
+  const favSection = document.createElement("section");
+  favSection.className = "catalog-section";
+  favSection.id = "favorites";
+  favSection.innerHTML = `
+    <header class="section-header fade-in-up">
+      <h2>Mis Favoritos ❤️</h2>
+      <p>Tus productos guardados</p>
+    </header>
+    <div class="products-grid" id="favorites-grid"></div>
+    <div id="fav-empty" style="text-align:center; width:100%; display:none; color:#ccc; margin-top:20px;">
+      <p style="font-size: 1.2rem;">No tienes favoritos aún.</p>
+      <p style="font-size: 0.9rem; opacity: 0.7;">¡Dale amor a los productos que te gusten!</p>
+      <button class="btn-contact" style="max-width:200px; margin:30px auto;" id="btn-back-catalog">Ir al inicio</button>
+    </div>
+  `;
+  container.appendChild(favSection);
+
+  function renderFavorites() {
+    const grid = document.getElementById("favorites-grid");
+    const emptyMsg = document.getElementById("fav-empty");
+    grid.innerHTML = "";
+
+    favorites = JSON.parse(localStorage.getItem("mishiFavorites")) || [];
+
+    if (favorites.length === 0) {
+      emptyMsg.style.display = "block";
+      return;
+    }
+    emptyMsg.style.display = "none";
+
+    const favItems = [];
+    if (typeof catalog !== 'undefined') {
+      catalog.forEach(section => {
+        section.items.forEach(item => {
+          if (favorites.includes(item.name)) {
+            favItems.push({ item, sectionId: section.id });
+          }
+        });
+      });
+    }
+
+    favItems.forEach(({ item, sectionId }) => {
+      const card = document.createElement("article");
+      card.className = "product-card floating";
+      
+      const images = item.images || (item.image ? [item.image] : []);
+      const mainImage = images.length > 0 ? images[0] : "";
+
+      card.innerHTML = `
+        <div class="card-image-container">
+          <img src="${mainImage}" class="card-image" alt="${item.name}" width="280" height="220" loading="lazy">
+          <button class="share-btn" aria-label="Compartir en WhatsApp">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/>
+            </svg>
+          </button>
+          <button class="fav-btn active" aria-label="Quitar de favoritos">♥</button>
+        </div>
+        <div class="card-body">
+          <h3>${item.name}</h3>
+          <p>${item.description}</p>
+          <button class="btn-contact">Cotizar</button>
+        </div>
+      `;
+
+      const shareBtn = card.querySelector(".share-btn");
+      shareBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const productId = item.name.toLowerCase().trim().replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
+        
+        const pageUrl = "https://gambito404.github.io/MishiStudio/";
+        const text = `Mira este producto de Mishi Studio: *${item.name}*\n${pageUrl}#${productId}`;
+        const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank');
+      });
+
+      const favBtn = card.querySelector(".fav-btn");
+      favBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const index = favorites.indexOf(item.name);
+        if (index > -1) {
+          favorites.splice(index, 1);
+          localStorage.setItem("mishiFavorites", JSON.stringify(favorites));
+          card.style.opacity = "0";
+          card.style.transform = "scale(0.8)";
+          setTimeout(() => renderFavorites(), 300);
+          showToast(`💔 ${item.name} eliminado`);
+          updateFavBadge(true);
+        }
+      });
+
+      card.querySelector(".btn-contact").addEventListener("click", () => openModal(item));
+      
+      card.querySelector(".card-image").addEventListener("click", () => openLightbox(images, 0));
+
+      grid.appendChild(card);
+    });
+  }
+
+  const favLi = document.createElement("li");
+  const favLink = document.createElement("a");
+  favLink.href = "#favorites";
+  favLink.innerHTML = 'Favoritos <span id="favCount" class="nav-badge">0</span>';
+  favLi.appendChild(favLink);
+  navLinks.appendChild(favLi);
+
+  /* ===== SONIDO POP ===== */
+  const playPopSound = () => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.15);
+
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  };
+
+  const updateFavBadge = (playSound = false) => {
+    const badge = document.getElementById("favCount");
+    if (badge) {
+      badge.textContent = favorites.length;
+      badge.style.display = favorites.length > 0 ? "inline-flex" : "none";
+      
+      if (favorites.length > 0) {
+        if (playSound) playPopSound();
+      }
+    }
+  };
+  updateFavBadge(false);
+  renderFavorites();
+
+  favLink.addEventListener("click", (e) => {
+    navLinks.classList.remove("active");
+    const toggleBtn = document.querySelector(".menu-toggle");
+    if (toggleBtn) toggleBtn.innerHTML = "☰";
+  });
+
+  document.getElementById("btn-back-catalog").addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
   /* ===== BOTÓN DE INSTALACIÓN PWA ===== */
   let deferredPrompt;
   const installLi = document.createElement("li");
@@ -626,7 +1069,6 @@ document.addEventListener("DOMContentLoaded", () => {
   installBtn.href = "#";
   installBtn.innerHTML = "📲 INSTALAR APP";
   installBtn.style.color = "#4cd137"; // Verde brillante para destacar
-  installBtn.style.fontWeight = "800";
   installLi.style.display = "none";
   installLi.appendChild(installBtn);
   navLinks.appendChild(installLi);
@@ -665,7 +1107,7 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log("✅ App instalada correctamente");
   });
 
-  // Observer para animaciones al hacer scroll
+  /* ===== SCROLL ANIMATIONS ===== */
   const observerOptions = {
     threshold: 0.1,
     rootMargin: "0px 0px -50px 0px"
@@ -688,7 +1130,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll('.fade-in-up').forEach(el => observer.observe(el));
 
-  // Scroll Spy: Detectar sección activa
+  /* ===== SCROLL SPY ===== */
   const sections = document.querySelectorAll("section.catalog-section");
   const navItems = document.querySelectorAll(".nav-links a");
 
@@ -710,4 +1152,95 @@ document.addEventListener("DOMContentLoaded", () => {
   }, spyOptions);
 
   sections.forEach((section) => spyObserver.observe(section));
+
+  /* ===== AUTO RELOAD ===== */
+  let refreshing = false;
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+  }
+
+  /* ===== CUSTOM SCROLLBAR (LA TRAMPITA JS) ===== */
+  const scrollTrack = document.createElement('div');
+  scrollTrack.id = 'custom-scrollbar-track';
+  const scrollThumb = document.createElement('div');
+  scrollThumb.id = 'custom-scrollbar-thumb';
+  scrollTrack.appendChild(scrollThumb);
+  document.body.appendChild(scrollTrack);
+
+  const updateScrollThumb = () => {
+    const docHeight = document.documentElement.scrollHeight;
+    const winHeight = window.innerHeight;
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    
+    let thumbHeight = Math.max((winHeight / docHeight) * winHeight, 50); 
+    
+    const maxScrollTop = docHeight - winHeight;
+    const maxThumbTop = winHeight - thumbHeight;
+    
+    let thumbTop = 0;
+    if (maxScrollTop > 0) {
+        thumbTop = (scrollTop / maxScrollTop) * maxThumbTop;
+    }
+
+    scrollThumb.style.height = `${thumbHeight}px`;
+    scrollThumb.style.transform = `translateY(${thumbTop}px)`;
+    
+    scrollTrack.style.display = docHeight <= winHeight ? 'none' : 'block';
+  };
+
+  window.addEventListener('scroll', updateScrollThumb);
+  window.addEventListener('resize', updateScrollThumb);
+  
+  const resizeObserver = new ResizeObserver(() => updateScrollThumb());
+  resizeObserver.observe(document.body);
+
+  let isDragging = false;
+  let startY = 0;
+  let startScrollTop = 0;
+
+  const startDrag = (clientY) => {
+    isDragging = true;
+    startY = clientY;
+    startScrollTop = window.scrollY || document.documentElement.scrollTop;
+    document.body.style.userSelect = 'none';
+  };
+
+  const onDrag = (clientY) => {
+    if (!isDragging) return;
+    const winHeight = window.innerHeight;
+    const docHeight = document.documentElement.scrollHeight;
+    const thumbHeight = scrollThumb.offsetHeight;
+    const maxThumbTop = winHeight - thumbHeight;
+    const maxScrollTop = docHeight - winHeight;
+
+    const deltaY = clientY - startY;
+    const scrollDelta = (deltaY / maxThumbTop) * maxScrollTop;
+    
+    window.scrollTo(0, startScrollTop + scrollDelta);
+  };
+
+  const stopDrag = () => {
+    isDragging = false;
+    document.body.style.userSelect = '';
+  };
+
+  scrollThumb.addEventListener('mousedown', (e) => startDrag(e.clientY));
+  document.addEventListener('mousemove', (e) => onDrag(e.clientY));
+  document.addEventListener('mouseup', stopDrag);
+
+  scrollThumb.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    startDrag(e.touches[0].clientY);
+  }, { passive: false });
+  
+  document.addEventListener('touchmove', (e) => {
+    if(isDragging) e.preventDefault();
+    onDrag(e.touches[0].clientY);
+  }, { passive: false });
+  
+  document.addEventListener('touchend', stopDrag);
 });
