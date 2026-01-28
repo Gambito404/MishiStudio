@@ -1,4 +1,4 @@
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const loadingOverlay = document.getElementById('loading-overlay');
   const mainContent = document.querySelector('main');
   const footer = document.querySelector('footer');
@@ -19,9 +19,156 @@ document.addEventListener("DOMContentLoaded", () => {
     if (footer) footer.style.opacity = 1;
   };
 
+  /* ===== FUNCIÓN HELPER: TOAST NOTIFICATION ===== */
+  const showToast = (message) => {
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.innerHTML = `✅ ${message}`;
+    document.body.appendChild(toast);
+
+    // Forzar reflow para la animación
+    toast.offsetHeight; 
+    toast.classList.add("show");
+
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.remove(), 400);
+    }, 3000);
+  };
+
+  /* ===== CARGAR DATOS DE GOOGLE SHEETS ===== */
+  let catalog = [];
+
+  const loadCatalogData = async () => {
+    const SHEET_ID = "19AIPO8SiAsRgC16cM37sIWKME3VPxefgFyUskJXX5z8";
+    const PRODUCTS_SHEET = "Productos";
+    const IMAGES_SHEET = "Imagenes";
+    const PRICES_SHEET = "Precios";
+
+    try {
+      const fetchOptions = { cache: 'reload' };
+
+      const [productsRes, imagesRes, pricesRes] = await Promise.all([
+        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${PRODUCTS_SHEET}`, fetchOptions),
+        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${IMAGES_SHEET}`, fetchOptions),
+        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${PRICES_SHEET}`, fetchOptions)
+      ]);
+
+      if (!productsRes.ok || !imagesRes.ok || !pricesRes.ok) {
+        throw new Error("Falló la conexión con una o más hojas de Google Sheets.");
+      }
+
+      const productsData = await productsRes.json();
+      const imagesData = await imagesRes.json();
+      const pricesData = await pricesRes.json();
+
+      const imagesMap = new Map();
+      let currentImgId = null;
+
+      imagesData.forEach(row => {
+        const rawId = row.id_producto || row.Id_producto;
+        if (rawId && String(rawId).trim() !== "") {
+            currentImgId = String(rawId).trim();
+        }
+
+        if (!currentImgId) return;
+
+        if (!imagesMap.has(currentImgId)) {
+          imagesMap.set(currentImgId, []);
+        }
+        
+        let imageUrl = row.url_imagen || row.Imagenes || "";
+        
+        if (imageUrl && String(imageUrl).trim() !== "") {
+            imageUrl = String(imageUrl).trim();
+            if (imageUrl.includes('drive.google.com') && imageUrl.includes('/file/d/')) {
+                try {
+                    const driveId = imageUrl.split('/file/d/')[1].split('/')[0];
+                    imageUrl = `https://lh3.googleusercontent.com/d/${driveId}`;
+                } catch(e) {}
+            }
+            imagesMap.get(currentImgId).push(imageUrl);
+        }
+      });
+
+      const pricesMap = new Map();
+      let currentPriceId = null;
+
+      pricesData.forEach(row => {
+        const rawId = row.id_producto || row.Id_producto;
+        if (rawId && String(rawId).trim() !== "") {
+            currentPriceId = String(rawId).trim();
+        }
+
+        if (!currentPriceId) return;
+
+        if (!pricesMap.has(currentPriceId)) {
+          pricesMap.set(currentPriceId, []);
+        }
+        
+        const quantity = parseInt(row.cantidad || row.Cantidad || row.Cantidades);
+        const price = parseFloat(row.precio || row.Precio || row.Precios);
+        
+        if (!isNaN(quantity) && !isNaN(price)) {
+            pricesMap.get(currentPriceId).push({ quantity, price });
+        }
+      });
+
+      const newCatalog = [];
+      let currentSection = null;
+
+      productsData.forEach(row => {
+        const catId = row.Categoria;
+        if (catId && String(catId).trim() !== "") {
+          currentSection = {
+            id: String(catId).toLowerCase().trim(),
+            title: row.Titulo || catId,
+            subtitle: row.Subtitulo || "",
+            items: []
+          };
+          newCatalog.push(currentSection);
+        }
+
+        const prodName = row.Nombre_Producto;
+        const prodId = row.Id_producto;
+        if (prodName && prodId && String(prodName).trim() !== "") {
+          
+          const productImages = imagesMap.get(prodId) || [];
+          const productPrices = pricesMap.get(prodId) || [];
+          
+          productPrices.sort((a, b) => a.quantity - b.quantity);
+
+          const mainImage = productImages.length > 0 ? productImages[0] : "";
+
+          if (currentSection) {
+            currentSection.items.push({
+              name: prodName,
+              description: row.Descripcion || "",
+              image: mainImage,
+              images: productImages,
+              prices: productPrices
+            });
+          }
+        }
+      });
+
+      if (newCatalog.length > 0) {
+        return newCatalog;
+      }
+      return [];
+
+    } catch (error) {
+      console.error("❌ Error crítico al cargar el catálogo desde Excel. La tienda no mostrará productos.", error);
+      return [];
+    }
+  };
+
+  const initialData = await loadCatalogData();
+  if (initialData.length > 0) catalog = initialData;
+
   const preloadResources = async () => {
     const imageUrls = [];
-    if (typeof catalog !== 'undefined') {
+    if (catalog.length > 0) {
       catalog.forEach(section => {
         section.items.forEach(item => {
           if (item.image) imageUrls.push(item.image);
@@ -204,7 +351,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const checkoutBtn = document.getElementById("checkoutBtn");
 
   const validateCartPrices = () => {
-    if (!cart.length || typeof catalog === 'undefined') return;
+    if (!cart.length || !catalog.length) return;
     
     let cartUpdated = false;
 
@@ -528,22 +675,6 @@ document.addEventListener("DOMContentLoaded", () => {
     return result;
   };
 
-  const showToast = (message) => {
-    const toast = document.createElement("div");
-    toast.className = "toast";
-    toast.innerHTML = `✅ ${message}`;
-    document.body.appendChild(toast);
-
-    // Forzar reflow para la animación
-    toast.offsetHeight; 
-    toast.classList.add("show");
-
-    setTimeout(() => {
-      toast.classList.remove("show");
-      setTimeout(() => toast.remove(), 400);
-    }, 3000);
-  };
-
   addToCartBtn.addEventListener("click", () => {
     const option = getSelectedOption();
     if (!option) return;
@@ -615,7 +746,7 @@ document.addEventListener("DOMContentLoaded", () => {
           </label>
   `;
 
-  if (typeof catalog !== 'undefined') {
+  if (catalog.length > 0) {
     catalog.forEach((section) => {
       filterHtml += `
         <label class="filter-option">
@@ -721,71 +852,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let globalImageCounter = 0;
 
-  catalog.forEach((section) => {
-    /* ===== NAVBAR ===== */
-    const li = document.createElement("li");
-    const link = document.createElement("a");
-    link.href = `#${section.id}`;
-    link.textContent = section.title;
-
-    link.addEventListener("click", () => {
-      navLinks.classList.remove("active");
-      const toggleBtn = document.querySelector(".menu-toggle");
-      if (toggleBtn) toggleBtn.innerHTML = "☰";
-    });
-
-    li.appendChild(link);
-    navLinks.appendChild(li);
-
-    /* ===== SECCIÓN ===== */
-    const sectionEl = document.createElement("section");
-    sectionEl.className = "catalog-section";
-    sectionEl.id = section.id;
-
-    sectionEl.innerHTML = `
-      <header class="section-header fade-in-up">
-        <h2>${section.title}</h2>
-        <p>${section.subtitle}</p>
-      </header>
-      <div class="products-grid"></div>
-    `;
-
-    const grid = sectionEl.querySelector(".products-grid");
-
-    section.items.forEach((item) => {
-      const card = document.createElement("article");
-      card.className = "product-card floating";
-      
-      const productId = item.name.toLowerCase().trim().replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
-      card.id = productId;
-
-      const images = item.images || (item.image ? [item.image] : []);
-      const mainImage = images.length > 0 ? images[0] : "";
-
-      const controlsHtml =
-        images.length > 1
-          ? `
-        <button class="img-btn prev">❮</button>
-        <button class="img-btn next">❯</button>`
-          : "";
-
-      const imageBadge =
-        images.length > 1
-          ? `<div class="image-badge">1 / ${images.length}</div>`
-          : "";
-      
-      const isFav = favorites.includes(item.name);
-
-      const isLCP = globalImageCounter < 4;
-      const loadingAttr = isLCP ? 'loading="eager"' : 'loading="lazy"';
-      const priorityAttr = isLCP ? 'fetchpriority="high"' : '';
-      globalImageCounter++;
-
-      const pricesList = item.prices || [];
-
-      const pricesHtml =
-        pricesList.length > 0
-          ? `
+  /* ===== FUNCIÓN HELPER: GENERAR HTML DE PRECIOS ===== */
+  const generatePriceTableHtml = (pricesList) => {
+    if (!pricesList || pricesList.length === 0) return "";
+    
+    return `
         <table class="price-table">
           <thead>
             <tr>
@@ -808,8 +879,42 @@ document.addEventListener("DOMContentLoaded", () => {
               .join("")}
           </tbody>
         </table>
-      `
+      `;
+  };
+
+  /* ===== FUNCIÓN HELPER: CREAR TARJETA DE PRODUCTO ===== */
+  const createProductCard = (item, forceEager = false) => {
+      const card = document.createElement("article");
+      card.className = "product-card";
+      
+      const productId = item.name.toLowerCase().trim().replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
+      card.id = productId;
+
+      const images = item.images || (item.image ? [item.image] : []);
+      const mainImage = images.length > 0 ? images[0] : "";
+
+      const controlsHtml =
+        images.length > 1
+          ? `
+        <button class="img-btn prev">❮</button>
+        <button class="img-btn next">❯</button>`
           : "";
+
+      const imageBadge =
+        images.length > 1
+          ? `<div class="image-badge">1 / ${images.length}</div>`
+          : "";
+      
+      const isFav = favorites.includes(item.name);
+
+      const isLCP = forceEager || globalImageCounter < 4;
+      const loadingAttr = isLCP ? 'loading="eager"' : 'loading="lazy"';
+      const priorityAttr = isLCP ? 'fetchpriority="high"' : '';
+      globalImageCounter++;
+
+      const pricesList = item.prices || [];
+
+      const pricesHtml = generatePriceTableHtml(pricesList);
 
       card.innerHTML = `
         <div class="card-image-container">
@@ -902,11 +1007,49 @@ document.addEventListener("DOMContentLoaded", () => {
         openLightbox(images, currentIndex);
       });
 
+      return card;
+  };
+
+  /* ===== FUNCIÓN HELPER: RENDERIZAR SECCIÓN ===== */
+  const renderSection = (section) => {
+    const li = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = `#${section.id}`;
+    link.textContent = section.title;
+
+    link.addEventListener("click", () => {
+      navLinks.classList.remove("active");
+      const toggleBtn = document.querySelector(".menu-toggle");
+      if (toggleBtn) toggleBtn.innerHTML = "☰";
+    });
+
+    li.appendChild(link);
+    navLinks.appendChild(li);
+
+    const sectionEl = document.createElement("section");
+    sectionEl.className = "catalog-section";
+    sectionEl.id = section.id;
+
+    sectionEl.innerHTML = `
+      <header class="section-header fade-in-up">
+        <h2>${section.title}</h2>
+        <p>${section.subtitle}</p>
+      </header>
+      <div class="products-grid"></div>
+    `;
+
+    const grid = sectionEl.querySelector(".products-grid");
+
+    section.items.forEach((item) => {
+      const card = createProductCard(item);
+      card.classList.add("floating");
       grid.appendChild(card);
     });
 
     container.appendChild(sectionEl);
-  });
+  };
+
+  catalog.forEach((section) => renderSection(section));
 
   /* ===== SECCIÓN FAVORITOS (NUEVA) ===== */
   const favSection = document.createElement("section");
@@ -940,7 +1083,7 @@ document.addEventListener("DOMContentLoaded", () => {
     emptyMsg.style.display = "none";
 
     const favItems = [];
-    if (typeof catalog !== 'undefined') {
+    if (catalog.length > 0) {
       catalog.forEach(section => {
         section.items.forEach(item => {
           if (favorites.includes(item.name)) {
@@ -1243,4 +1386,35 @@ document.addEventListener("DOMContentLoaded", () => {
   }, { passive: false });
   
   document.addEventListener('touchend', stopDrag);
+
+  /* ===== AUTO UPDATE (POLLING 10s) ===== */
+  let updateNotificationShown = false;
+
+  const checkForUpdates = async () => {
+    if (updateNotificationShown) return;
+
+    const newCatalog = await loadCatalogData();
+    
+    if (!newCatalog || newCatalog.length === 0) return;
+
+    const currentData = JSON.stringify(catalog);
+    const newData = JSON.stringify(newCatalog);
+
+    if (currentData !== newData) {
+        updateNotificationShown = true;
+        showUpdateNotification();
+    }
+  };
+
+  const showUpdateNotification = () => {
+    const notification = document.createElement("div");
+    notification.className = "update-notification";
+    notification.innerHTML = `
+      <span>🔄 Hay nuevos productos o precios disponibles.</span>
+      <button onclick="window.location.reload()">Actualizar</button>
+    `;
+    document.body.appendChild(notification);
+  };
+
+  setInterval(checkForUpdates, 10000);
 });

@@ -1,5 +1,5 @@
 
-const CACHE_NAME = "mishi-v2.5.2";
+const CACHE_NAME = "mishi-v2.6.0";
 const ASSETS = [
   "./images/logo.webp",
   "./images/dribbble_1.gif",
@@ -91,7 +91,28 @@ self.addEventListener("fetch", (e) => {
 
   if (url.pathname.endsWith('data.js') || url.pathname.endsWith('style.css') || url.pathname.endsWith('app.js')) {
     e.respondWith(
-      fetch(e.request.url, { cache: 'reload' })
+      fetch(e.request.url, { cache: 'reload' }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Estrategia Network First para la API (Google Sheets)
+  if (url.hostname.includes('opensheet.elk.sh')) {
+    const networkRequest = new Request(e.request, { cache: 'reload' });
+
+    e.respondWith(
+      fetch(networkRequest).then((networkResponse) => {
+        return caches.open(CACHE_NAME).then((cache) => {
+          const cleanUrl = new URL(e.request.url);
+          cleanUrl.search = ''; 
+          cache.put(cleanUrl.toString(), networkResponse.clone());
+          return networkResponse;
+        });
+      }).catch(() => {
+        const cleanUrl = new URL(e.request.url);
+        cleanUrl.search = '';
+        return caches.match(cleanUrl.toString());
+      })
     );
     return;
   }
