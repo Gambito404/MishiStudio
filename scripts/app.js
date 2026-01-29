@@ -3,6 +3,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   const mainContent = document.querySelector('main');
   const footer = document.querySelector('footer');
 
+  /* ===== PWA INSTALL EVENT (Capturar inmediatamente) ===== */
+  let deferredPrompt; // Variable global para guardar el evento
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    // Si el botón ya existe (se creó tarde), lo mostramos ahora
+    const installLi = document.getElementById("pwa-install-li");
+    if (installLi) installLi.style.display = "block";
+  });
+
   if (mainContent) mainContent.style.opacity = 0;
   if (footer) footer.style.opacity = 0;
 
@@ -1206,49 +1216,53 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   /* ===== BOTÓN DE INSTALACIÓN PWA ===== */
-  let deferredPrompt;
-  const installLi = document.createElement("li");
-  const installBtn = document.createElement("a");
-  installBtn.href = "#";
-  installBtn.innerHTML = "📲 INSTALAR APP";
-  installBtn.style.color = "#4cd137"; // Verde brillante para destacar
-  installLi.style.display = "none";
-  installLi.appendChild(installBtn);
-  navLinks.appendChild(installLi);
-
-  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+  const setupInstallButton = () => {
+    const installLi = document.createElement("li");
+    installLi.id = "pwa-install-li"; // ID para encontrarlo desde el evento global
+    const installBtn = document.createElement("a");
+    installBtn.href = "#";
+    installBtn.innerHTML = "📲 INSTALAR APP";
+    installBtn.style.color = "#4cd137";
     installLi.style.display = "none";
-  }
+    installLi.appendChild(installBtn);
+    navLinks.appendChild(installLi);
 
-  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
-  window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    installLi.style.display = "block";
-    console.log("✅ PWA lista para instalar");
-  });
-
-  installBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then((choiceResult) => {
-        installLi.style.display = "none";
-        deferredPrompt = null; 
-      });
-    } else if (isIos) {
-      alert("Para instalar en iPhone/iPad:\n1. Toca el botón 'Compartir' (cuadrado con flecha hacia arriba) en la barra inferior.\n2. Busca y selecciona la opción 'Agregar al inicio'.");
-    } else {
-      alert("⚠️ Error de PWA detectado:\nTu imagen 'logo.webp' no tiene el tamaño correcto.\n\nSolución:\nUsa una imagen cuadrada exacta (ej. 512x512) o el navegador bloqueará la instalación.");
+    if (isStandalone) {
+      return;
     }
-  });
 
-  window.addEventListener('appinstalled', () => {
-    installLi.style.display = "none";
-    deferredPrompt = null;
-    console.log("✅ App instalada correctamente");
-  });
+    if (isIos) {
+      installLi.style.display = "block";
+    }
+
+    // Si el evento ocurrió antes de llegar aquí, mostramos el botón ahora
+    if (deferredPrompt) {
+      installLi.style.display = "block";
+    }
+
+    installBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(() => {
+          installLi.style.display = "none";
+          deferredPrompt = null;
+        });
+      } else if (isIos) {
+        alert("Para instalar en iPhone/iPad:\n1. Toca el botón 'Compartir' (cuadrado con flecha hacia arriba) en la barra inferior.\n2. Busca y selecciona la opción 'Agregar al inicio'.");
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installLi.style.display = "none";
+      deferredPrompt = null;
+      console.log("✅ App instalada correctamente");
+    });
+  };
+  setupInstallButton();
 
   /* ===== SCROLL ANIMATIONS ===== */
   const observerOptions = {
@@ -1417,4 +1431,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
 
   setInterval(checkForUpdates, 10000);
+
+  /* ===== DETECCIÓN OFFLINE/ONLINE ===== */
+  const offlineOverlay = document.getElementById('offline-overlay');
+
+  const updateOnlineStatus = () => {
+    if (!offlineOverlay) return;
+    if (navigator.onLine) {
+      offlineOverlay.classList.remove('active');
+    } else {
+      offlineOverlay.classList.add('active');
+    }
+  };
+
+  window.addEventListener('online', () => { updateOnlineStatus(); showToast("✅ Conexión restaurada"); });
+  window.addEventListener('offline', () => { updateOnlineStatus(); });
+  
+  updateOnlineStatus(); // Verificar estado inicial al cargar
 });
