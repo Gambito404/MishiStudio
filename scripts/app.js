@@ -3,6 +3,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   const mainContent = document.querySelector('main');
   const footer = document.querySelector('footer');
 
+  /* ===== CONFIGURACIÓN MODO VENDEDOR ===== */
+  const urlParams = new URLSearchParams(window.location.search);
+  const sellerId = urlParams.get('id'); // ID del vendedor (ej: V-101)
+  let sellerName = urlParams.get('n') || urlParams.get('nombre'); // Nombre
+  let sellerPhone = urlParams.get('p') || urlParams.get('telefono'); // WhatsApp del vendedor
+  
+  const isVendorMode = urlParams.has('v') || urlParams.has('vendedor') || !!sellerPhone || !!sellerId;
+  const MAIN_PHONE = "59176904748"; // Teléfono principal de la tienda
+  let V_WHATSAPP = sellerPhone || "59177424842"; // Prioriza el del vendedor, sino usa el genérico
+
   /* ===== PWA INSTALL EVENT (Capturar inmediatamente) ===== */
   let deferredPrompt; // Variable global para guardar el evento
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -53,7 +63,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const SHEET_ID = "19AIPO8SiAsRgC16cM37sIWKME3VPxefgFyUskJXX5z8";
     const PRODUCTS_SHEET = "Productos";
     const IMAGES_SHEET = "Imagenes";
-    const PRICES_SHEET = "Precios";
+    const PRICES_SHEET = isVendorMode ? "Vendedores" : "Precios";
 
     try {
       const fetchOptions = { cache: 'reload' };
@@ -76,7 +86,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       let currentImgId = null;
 
       imagesData.forEach(row => {
-        const rawId = row.id_producto || row.Id_producto;
+        const rawId = row.idProducto || row.id_producto || row.Id_producto;
         if (rawId && String(rawId).trim() !== "") {
             currentImgId = String(rawId).trim();
         }
@@ -103,11 +113,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const pricesMap = new Map();
       let currentPriceId = null;
+      let currentSellerId = null;
+      let currentSellerName = null;
+      let currentSellerPhone = null;
 
       pricesData.forEach(row => {
-        const rawId = row.id_producto || row.Id_producto;
-        if (rawId && String(rawId).trim() !== "") {
-            currentPriceId = String(rawId).trim();
+        // Lógica de herencia (Cascada)
+        const rSellerId = row.idVendedor || row.idvendedor || row.IdVendedor;
+        const rName = row.nombre || row.Nombre;
+        const rPhone = row.numero || row.Numero || row.telefono;
+        const rProdId = row.idProducto || row.id_producto || row.Id_producto;
+
+        if (rSellerId && String(rSellerId).trim() !== "") {
+            currentSellerId = String(rSellerId).trim();
+            currentPriceId = null; // Reiniciar ID de producto al cambiar de vendedor para evitar herencia errónea
+        }
+        if (rName && String(rName).trim() !== "") currentSellerName = String(rName).trim();
+        if (rPhone && String(rPhone).trim() !== "") currentSellerPhone = String(rPhone).trim();
+        if (rProdId && String(rProdId).trim() !== "") currentPriceId = String(rProdId).trim();
+
+        // Filtrar por ID del vendedor si estamos en modo vendedor
+        if (isVendorMode && sellerId) {
+            if (currentSellerId !== String(sellerId).trim()) return;
+            
+            // Si el nombre o teléfono no vinieron por URL, los tomamos de la fila del vendedor
+            if (!sellerName && currentSellerName) sellerName = currentSellerName;
+            if (!sellerPhone && currentSellerPhone) {
+                sellerPhone = currentSellerPhone;
+                V_WHATSAPP = sellerPhone;
+            }
         }
 
         if (!currentPriceId) return;
@@ -140,7 +174,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
 
         const prodName = row.Nombre_Producto;
-        const prodId = row.Id_producto;
+        const prodId = String(row.Id_producto || "").trim();
         if (prodName && prodId && String(prodName).trim() !== "") {
           
           const productImages = imagesMap.get(prodId) || [];
@@ -151,21 +185,27 @@ document.addEventListener("DOMContentLoaded", async () => {
           const mainImage = productImages.length > 0 ? productImages[0] : "";
 
           if (currentSection) {
-            currentSection.items.push({
-              name: prodName,
-              description: row.Descripcion || "",
-              image: mainImage,
-              images: productImages,
-              prices: productPrices
-            });
+            // Si es modo vendedor, solo agregar si tiene precios definidos
+            if (!isVendorMode || (isVendorMode && productPrices.length > 0)) {
+              currentSection.items.push({
+                name: prodName,
+                description: row.Descripcion || "",
+                image: mainImage,
+                images: productImages,
+                prices: productPrices
+              });
+            }
           }
         }
       });
 
-      if (newCatalog.length > 0) {
-        return newCatalog;
-      }
-      return [];
+      // Actualizar marca visual si se detectó el nombre del vendedor en el Excel
+      updateBrandDisplay();
+
+      // Filtrar secciones que pudieron quedar vacías tras el filtrado de productos
+      const filteredCatalog = newCatalog.filter(section => section.items.length > 0);
+
+      return filteredCatalog;
 
     } catch (error) {
       console.error("❌ Error crítico al cargar el catálogo desde Excel. La tienda no mostrará productos.", error);
@@ -528,8 +568,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     let total = 0;
     let hasCustom = false;
-    let message =
-      "Hola Mishi Studio 🐱, quiero realizar el siguiente pedido:\n\n";
+    
+    // Mensaje personalizado según el vendedor
+    let greeting = sellerName ? `Hola ${sellerName} de Mishi Studio 🐱` : "Hola Mishi Studio 🐱";
+    let message = `${greeting}, quiero realizar el siguiente pedido:\n\n`;
 
     cart.forEach((item, i) => {
       message += `- ${i + 1}. *${item.name}* \n   Detalle: ${item.desc}\n`;
@@ -546,7 +588,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     message += `\n*Total Estimado: ${totalText}*`;
     message += "\nEspero su confirmación. ¡Gracias!";
 
-    const url = `https://wa.me/59176904748?text=${encodeURIComponent(message)}`;
+    const targetPhone = isVendorMode ? V_WHATSAPP : MAIN_PHONE;
+    const url = `https://wa.me/${targetPhone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
     cart = [];
     saveCart();
@@ -610,7 +653,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentProduct = product;
     document.getElementById("modalTitle").textContent =
       `Cotizar: ${product.name}`;
+    document.getElementById("modalTitle").textContent = isVendorMode ? 
+      `Añadir: ${product.name}` : `Cotizar: ${product.name}`;
     optionsContainer.innerHTML = "";
+
+    // Ocultar opción de cotización personalizada para vendedores
+    const customOpt = document.querySelector('label[for="opt-custom"]');
+    if (customOpt) customOpt.style.display = isVendorMode ? "none" : "flex";
 
     if (product.prices) {
       const unitPriceObj = product.prices.find((p) => p.quantity === 1);
@@ -729,13 +778,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     showToast(`¡${currentProduct.name} agregado al carrito!`);
   });
 
-  const brand = document.querySelector(".nav-brand");
-  if (brand) {
-    brand.innerHTML = `
-      <img src="images/logo.webp" class="brand-logo" alt="Mishi Logo" width="60" height="60">
-      <span>MISHI STUDIO</span>
-    `;
+  function updateBrandDisplay() {
+    const brand = document.querySelector(".nav-brand");
+    if (brand) {
+      const brandText = sellerName ? `MISHI (${sellerName.toUpperCase()})` : (isVendorMode ? "MISHI (MAYORISTA)" : "MISHI STUDIO");
+      brand.innerHTML = `
+        <img src="images/logo.webp" class="brand-logo" alt="Mishi Logo" width="60" height="60">
+        <span>${brandText}</span>
+      `;
+    }
   }
+  updateBrandDisplay();
 
   const container = document.getElementById("catalog");
   const navLinks = document.getElementById("nav-links");
@@ -866,6 +919,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   const generatePriceTableHtml = (pricesList) => {
     if (!pricesList || pricesList.length === 0) return "";
     
+    // Si solo hay un precio (individual), lo mostramos centrado y grande
+    if (pricesList.length === 1) {
+      const p = pricesList[0];
+      return `
+        <div class="price-row" style="justify-content: center; font-size: 1.1rem; border: none;">
+          <span class="price-val">${p.price} Bs</span>
+          ${p.quantity > 1 ? `<small style="margin-left:5px; font-size:0.7rem; color:#aaa;">(${p.quantity} Unid.)</small>` : ''}
+        </div>`;
+    }
+
+    // Si hay varias cantidades (escalas), mostramos la tabla completa
     return `
         <table class="price-table">
           <thead>
@@ -926,6 +990,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const pricesHtml = generatePriceTableHtml(pricesList);
 
+      const btnText = isVendorMode ? "Añadir al Carrito" : "Cotizar";
+
       card.innerHTML = `
         <div class="card-image-container">
           <img src="${mainImage}" class="card-image" alt="${item.name}" width="280" height="220" ${loadingAttr} ${priorityAttr} decoding="async">
@@ -945,7 +1011,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           <div class="pricing-container">
             ${pricesHtml}
           </div>
-          <button class="btn-contact">Cotizar</button>
+          <button class="btn-contact">${btnText}</button>
         </div>
       `;
 
