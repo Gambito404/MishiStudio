@@ -40,10 +40,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
 
   /* ===== FUNCIÓN HELPER: TOAST NOTIFICATION ===== */
-  const showToast = (message) => {
+  const showToast = (message, icon = '✅') => {
     const toast = document.createElement("div");
     toast.className = "toast";
-    toast.innerHTML = `✅ ${message}`;
+    toast.innerHTML = `${icon} ${message}`;
     document.body.appendChild(toast);
 
     // Forzar reflow para la animación
@@ -58,29 +58,38 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   /* ===== CARGAR DATOS DE GOOGLE SHEETS ===== */
   let catalog = [];
+  let catalogVersion = '0'; // Versión inicial
 
   const loadCatalogData = async () => {
     const SHEET_ID = "19AIPO8SiAsRgC16cM37sIWKME3VPxefgFyUskJXX5z8";
     const PRODUCTS_SHEET = "Productos";
     const IMAGES_SHEET = "Imagenes";
     const PRICES_SHEET = isVendorMode ? "Vendedores" : "Precios";
+    const VERSION_SHEET = "Version";
 
     try {
       const fetchOptions = { cache: 'reload' };
 
-      const [productsRes, imagesRes, pricesRes] = await Promise.all([
+      const [productsRes, imagesRes, pricesRes, versionRes] = await Promise.all([
         fetch(`https://opensheet.elk.sh/${SHEET_ID}/${PRODUCTS_SHEET}`, fetchOptions),
         fetch(`https://opensheet.elk.sh/${SHEET_ID}/${IMAGES_SHEET}`, fetchOptions),
-        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${PRICES_SHEET}`, fetchOptions)
+        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${PRICES_SHEET}`, fetchOptions),
+        fetch(`https://opensheet.elk.sh/${SHEET_ID}/${VERSION_SHEET}`, fetchOptions)
       ]);
 
-      if (!productsRes.ok || !imagesRes.ok || !pricesRes.ok) {
+      if (!productsRes.ok || !imagesRes.ok || !pricesRes.ok || !versionRes.ok) {
         throw new Error("Falló la conexión con una o más hojas de Google Sheets.");
       }
 
       const productsData = await productsRes.json();
       const imagesData = await imagesRes.json();
       const pricesData = await pricesRes.json();
+      const versionData = await versionRes.json();
+      
+      let remoteVersion = '0';
+      if (versionData.length > 0 && versionData[0].version) {
+        remoteVersion = versionData[0].version;
+      }
 
       const imagesMap = new Map();
       let currentImgId = null;
@@ -118,7 +127,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       let currentSellerPhone = null;
 
       pricesData.forEach(row => {
-        // Lógica de herencia (Cascada)
         const rSellerId = row.idVendedor || row.idvendedor || row.IdVendedor;
         const rName = row.nombre || row.Nombre;
         const rPhone = row.numero || row.Numero || row.telefono;
@@ -126,17 +134,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         if (rSellerId && String(rSellerId).trim() !== "") {
             currentSellerId = String(rSellerId).trim();
-            currentPriceId = null; // Reiniciar ID de producto al cambiar de vendedor para evitar herencia errónea
+            currentPriceId = null;
         }
         if (rName && String(rName).trim() !== "") currentSellerName = String(rName).trim();
         if (rPhone && String(rPhone).trim() !== "") currentSellerPhone = String(rPhone).trim();
         if (rProdId && String(rProdId).trim() !== "") currentPriceId = String(rProdId).trim();
 
-        // Filtrar por ID del vendedor si estamos en modo vendedor
         if (isVendorMode && sellerId) {
             if (currentSellerId !== String(sellerId).trim()) return;
-            
-            // Si el nombre o teléfono no vinieron por URL, los tomamos de la fila del vendedor
             if (!sellerName && currentSellerName) sellerName = currentSellerName;
             if (!sellerPhone && currentSellerPhone) {
                 sellerPhone = currentSellerPhone;
@@ -165,7 +170,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const catId = row.Categoria;
         if (catId && String(catId).trim() !== "") {
           currentSection = {
-            id: String(catId).toLowerCase().trim(),
+            id: String(catId).toLowerCase().trim().replace(/[\s\W-]+/g, '-'),
             title: row.Titulo || catId,
             subtitle: row.Subtitulo || "",
             items: []
@@ -175,46 +180,46 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const prodName = row.Nombre_Producto;
         const prodId = String(row.Id_producto || "").trim();
+        const prodStatus = String(row.Estado || "activo").toLowerCase().trim();
+
         if (prodName && prodId && String(prodName).trim() !== "") {
-          
           const productImages = imagesMap.get(prodId) || [];
           const productPrices = pricesMap.get(prodId) || [];
-          
           productPrices.sort((a, b) => a.quantity - b.quantity);
-
           const mainImage = productImages.length > 0 ? productImages[0] : "";
 
           if (currentSection) {
-            // Si es modo vendedor, solo agregar si tiene precios definidos
-            if (!isVendorMode || (isVendorMode && productPrices.length > 0)) {
-              currentSection.items.push({
-                name: prodName,
-                description: row.Descripcion || "",
-                image: mainImage,
-                images: productImages,
-                prices: productPrices
-              });
+            if (prodStatus !== "inactivo") {
+              if (!isVendorMode || (isVendorMode && productPrices.length > 0)) {
+                currentSection.items.push({
+                  id: prodId,
+                  name: prodName,
+                  description: row.Descripcion || "",
+                  image: mainImage,
+                  images: productImages,
+                  prices: productPrices,
+                  status: prodStatus
+                });
+              }
             }
           }
         }
       });
 
-      // Actualizar marca visual si se detectó el nombre del vendedor en el Excel
       updateBrandDisplay();
-
-      // Filtrar secciones que pudieron quedar vacías tras el filtrado de productos
       const filteredCatalog = newCatalog.filter(section => section.items.length > 0);
 
-      return filteredCatalog;
+      return { catalog: filteredCatalog, version: remoteVersion };
 
     } catch (error) {
-      console.error("❌ Error crítico al cargar el catálogo desde Excel. La tienda no mostrará productos.", error);
-      return [];
+      console.error("❌ Error crítico al cargar el catálogo.", error);
+      return { catalog: [], version: catalogVersion }; // Devuelve versión actual en caso de error
     }
   };
-
+  
   const initialData = await loadCatalogData();
-  if (initialData.length > 0) catalog = initialData;
+  catalog = initialData.catalog;
+  catalogVersion = initialData.version;
 
   const preloadResources = async () => {
     const imageUrls = [];
@@ -569,7 +574,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     let total = 0;
     let hasCustom = false;
     
-    // Mensaje personalizado según el vendedor
     let greeting = sellerName ? `Hola ${sellerName} de Mishi Studio 🐱` : "Hola Mishi Studio 🐱";
     let message = `${greeting}, quiero realizar el siguiente pedido:\n\n`;
 
@@ -657,7 +661,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       `Añadir: ${product.name}` : `Cotizar: ${product.name}`;
     optionsContainer.innerHTML = "";
 
-    // Ocultar opción de cotización personalizada para vendedores
     const customOpt = document.querySelector('label[for="opt-custom"]');
     if (customOpt) customOpt.style.display = isVendorMode ? "none" : "flex";
 
@@ -711,9 +714,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const getSelectedOption = () => {
     if (!currentProduct) return;
-    const selected = document.querySelector(
-      'input[name="priceOption"]:checked',
-    );
+    const selected = document.querySelector('input[name="priceOption"]:checked');
     if (!selected) return null;
 
     let result = { text: "", price: 0 };
@@ -738,18 +739,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     const option = getSelectedOption();
     if (!option) return;
 
-    const images =
-      currentProduct.images ||
-      (currentProduct.image ? [currentProduct.image] : []);
+    const images = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
 
     let originalPrice = 0;
     let saving = 0;
     let selectedIdx = 'custom';
 
     if (option.price > 0 && currentProduct.prices) {
-      selectedIdx = document.querySelector(
-        'input[name="priceOption"]:checked',
-      ).value;
+      selectedIdx = document.querySelector('input[name="priceOption"]:checked').value;
       const priceData = currentProduct.prices[selectedIdx];
       const unitPriceObj = currentProduct.prices.find((p) => p.quantity === 1);
 
@@ -795,10 +792,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (!container || !navLinks) return;
 
-  /* ===== FILTRO DE PRODUCTOS (DROPDOWN) ===== */
-  let filterHtml = `
-    <div class="filter-container fade-in-up">
-      <div class="dropdown">
+  /* ===== FILTROS Y BÚSQUEDA ===== */
+  let filterControlsHtml = `
+    <div class="filter-controls-container fade-in-up">
+      <div class="search-wrapper">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="productSearch" class="search-input" placeholder="Buscar por nombre..." autocomplete="off">
+        <button class="clear-search-btn" aria-label="Limpiar búsqueda">&times;</button>
+        <div class="suggestions-list"></div>
+      </div>
+
+      <!-- Filter Dropdown -->
+      <div class="dropdown filter-dropdown">
         <button class="dropdown-btn" id="filterDropdownBtn">
           Viendo: Todo <span>▼</span>
         </button>
@@ -811,7 +816,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (catalog.length > 0) {
     catalog.forEach((section) => {
-      filterHtml += `
+      filterControlsHtml += `
         <label class="filter-option">
           <input type="checkbox" value="${section.id}" checked>
           <span>${section.title}</span>
@@ -819,40 +824,136 @@ document.addEventListener("DOMContentLoaded", async () => {
       `;
     });
   }
-  filterHtml += `</div></div></div>`;
-  container.insertAdjacentHTML("afterbegin", filterHtml);
+  filterControlsHtml += `</div></div></div>`;
+  container.insertAdjacentHTML("afterbegin", filterControlsHtml);
 
-  const dropdownBtn = document.getElementById("filterDropdownBtn");
-  const dropdownContent = document.getElementById("filterDropdownContent");
+  container.insertAdjacentHTML('beforeend', '<div id="no-results-message" class="no-results-message" style="display: none;"><h4>🤔 Ningún producto encontrado</h4><p>Intenta con otra búsqueda o ajusta los filtros.</p></div>');
+
+  const filterDropdownBtn = document.getElementById("filterDropdownBtn");
+  const filterDropdownContent = document.getElementById("filterDropdownContent");
   const allCheckbox = container.querySelector('input[value="all"]');
   const categoryCheckboxes = container.querySelectorAll('.filter-option input:not([value="all"])');
 
-  dropdownBtn.addEventListener("click", (e) => {
+  const toggleDropdown = (btn, content) => {
+    content.classList.toggle("show");
+    btn.classList.toggle("active");
+  };
+
+  filterDropdownBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    dropdownContent.classList.toggle("show");
-    dropdownBtn.classList.toggle("active");
+    toggleDropdown(filterDropdownBtn, filterDropdownContent);
   });
 
   document.addEventListener("click", (e) => {
-    if (!dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
-      dropdownContent.classList.remove("show");
-      dropdownBtn.classList.remove("active");
+    if (!e.target.closest('.dropdown')) {
+      if (filterDropdownContent.classList.contains("show")) {
+        toggleDropdown(filterDropdownBtn, filterDropdownContent);
+      }
     }
   });
 
+  /* ===== LÓGICA DEL BUSCADOR ===== */
+  const searchInput = document.getElementById("productSearch");
+  const searchWrapper = searchInput.closest('.search-wrapper');
+  const clearSearchBtn = searchWrapper.querySelector('.clear-search-btn');
+  const suggestionsList = searchWrapper.querySelector('.suggestions-list');
+  const noResultsMessage = document.getElementById('no-results-message');
+
+  let allProductNames = catalog.flatMap(section => section.items.map(item => item.name));
+
+  const handleSearch = () => {
+    const query = searchInput.value.toLowerCase().trim();
+    searchWrapper.classList.toggle('has-content', query.length > 0);
+    const cards = document.querySelectorAll(".product-card:not(#favorites-grid .product-card)");
+    let hasVisibleCards = false;
+    
+    cards.forEach(card => {
+      const name = card.querySelector("h3").textContent.toLowerCase();
+      const matches = name.includes(query);
+      card.style.display = matches ? "flex" : "none";
+      if(matches) hasVisibleCards = true;
+    });
+
+    document.querySelectorAll(".catalog-section:not(#favorites)").forEach(section => {
+      const sectionId = section.id;
+      const isCategoryCheckedCheckbox = container.querySelector(`.filter-option input[value="${sectionId}"]`);
+      if(isCategoryCheckedCheckbox) {
+          const isCategoryChecked = isCategoryCheckedCheckbox.checked;
+          const visibleCards = section.querySelectorAll(".product-card[style='display: flex;']").length;
+          
+          if (isCategoryChecked) {
+            section.style.display = (visibleCards > 0 || query === "") ? "block" : "none";
+          }
+      }
+    });
+
+    if(noResultsMessage) {
+        noResultsMessage.style.display = !hasVisibleCards && query.length > 0 ? 'block' : 'none';
+    }
+
+    const favSection = document.getElementById("favorites");
+    if (favSection) {
+      favSection.style.display = query === "" ? "block" : "none";
+    }
+    suggestionsList.classList.remove('show');
+  };
+
+  const showSuggestions = () => {
+      const query = searchInput.value.toLowerCase().trim();
+      if (query.length === 0) {
+          suggestionsList.innerHTML = '';
+          suggestionsList.classList.remove('show');
+          return;
+      }
+      const suggestions = allProductNames.filter(name => name.toLowerCase().includes(query)).slice(0, 3);
+      if (suggestions.length > 0) {
+          suggestionsList.innerHTML = suggestions.map(s => `<div class="suggestion-item">${s}</div>`).join('');
+          suggestionsList.classList.add('show');
+          suggestionsList.querySelectorAll('.suggestion-item').forEach(item => {
+              item.addEventListener('click', () => {
+                  searchInput.value = item.textContent;
+                  handleSearch();
+                  suggestionsList.classList.remove('show');
+              });
+          });
+      } else {
+          suggestionsList.innerHTML = '';
+          suggestionsList.classList.remove('show');
+      }
+  };
+
+  searchInput.addEventListener("input", () => {
+      handleSearch();
+      showSuggestions();
+  });
+
+  clearSearchBtn.addEventListener("click", () => {
+    searchInput.value = "";
+    handleSearch();
+    showSuggestions();
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+      if (!searchWrapper.contains(e.target)) {
+          suggestionsList.classList.remove('show');
+      }
+  });
+  
   const updateFilterState = () => {
     const checkedBoxes = Array.from(categoryCheckboxes).filter(cb => cb.checked);
     const isAllSelected = checkedBoxes.length === categoryCheckboxes.length;
     
     allCheckbox.checked = isAllSelected;
 
+    const isMobile = window.innerWidth <= 768;
     if (isAllSelected) {
-      dropdownBtn.innerHTML = 'Viendo: Todo <span>▼</span>';
+      filterDropdownBtn.innerHTML = isMobile ? 'Filtrar: Todo <span>▼</span>' : 'Viendo: Todo <span>▼</span>';
     } else if (checkedBoxes.length === 0) {
-      dropdownBtn.innerHTML = '⚠️ Selecciona una <span>▼</span>';
+      filterDropdownBtn.innerHTML = '⚠️ Selecciona una <span>▼</span>';
     } else {
-      const names = checkedBoxes.map(cb => cb.nextElementSibling.textContent).join(', ');
-      dropdownBtn.innerHTML = `Viendo: ${names} <span>▼</span>`;
+      const text = isMobile ? `${checkedBoxes.length} sel.` : checkedBoxes.map(cb => cb.nextElementSibling.textContent).join(', ');
+      filterDropdownBtn.innerHTML = `Viendo: ${text} <span>▼</span>`;
     }
 
     categoryCheckboxes.forEach(cb => {
@@ -864,6 +965,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (cb.checked) {
         if (sectionEl) sectionEl.style.display = "block";
         if (navLi) navLi.style.display = "block";
+        if (searchInput.value.trim() !== "") handleSearch();
       } else {
         if (sectionEl) sectionEl.style.display = "none";
         if (navLi) navLi.style.display = "none";
@@ -889,6 +991,22 @@ document.addEventListener("DOMContentLoaded", async () => {
       updateFilterState();
     });
   });
+
+  /* ===== BOTÓN VOLVER ARRIBA ===== */
+  const scrollTopBtn = document.getElementById("scrollTopBtn");
+  if (scrollTopBtn) {
+    window.addEventListener("scroll", () => {
+        if (window.pageYOffset > 300) {
+            scrollTopBtn.classList.add("visible");
+        } else {
+            scrollTopBtn.classList.remove("visible");
+        }
+    });
+
+    scrollTopBtn.addEventListener("click", () => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
 
   /* ===== LÓGICA DEL MENÚ MÓVIL ===== */
   const navbar = document.querySelector(".navbar");
@@ -919,7 +1037,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const generatePriceTableHtml = (pricesList) => {
     if (!pricesList || pricesList.length === 0) return "";
     
-    // Si solo hay un precio (individual), lo mostramos centrado y grande
     if (pricesList.length === 1) {
       const p = pricesList[0];
       return `
@@ -929,7 +1046,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         </div>`;
     }
 
-    // Si hay varias cantidades (escalas), mostramos la tabla completa
     return `
         <table class="price-table">
           <thead>
@@ -960,6 +1076,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const createProductCard = (item, forceEager = false) => {
       const card = document.createElement("article");
       card.className = "product-card";
+      card.dataset.productId = item.id; // Usar el ID del producto
+      
+      if (item.status === "agotado") {
+        card.classList.add("is-sold-out");
+      }
       
       const productId = item.name.toLowerCase().trim().replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
       card.id = productId;
@@ -967,30 +1088,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       const images = item.images || (item.image ? [item.image] : []);
       const mainImage = images.length > 0 ? images[0] : "";
 
-      const controlsHtml =
-        images.length > 1
-          ? `
-        <button class="img-btn prev">❮</button>
-        <button class="img-btn next">❯</button>`
-          : "";
-
-      const imageBadge =
-        images.length > 1
-          ? `<div class="image-badge">1 / ${images.length}</div>`
-          : "";
-      
+      const controlsHtml = images.length > 1 ? `<button class="img-btn prev">❮</button><button class="img-btn next">❯</button>` : "";
+      const imageBadge = images.length > 1 ? `<div class="image-badge">1 / ${images.length}</div>` : "";
       const isFav = favorites.includes(item.name);
 
       const isLCP = forceEager || globalImageCounter < 4;
       const loadingAttr = isLCP ? 'loading="eager"' : 'loading="lazy"';
       const priorityAttr = isLCP ? 'fetchpriority="high"' : '';
-      globalImageCounter++;
+      if(!forceEager) globalImageCounter++;
 
-      const pricesList = item.prices || [];
-
-      const pricesHtml = generatePriceTableHtml(pricesList);
-
-      const btnText = isVendorMode ? "Añadir al Carrito" : "Cotizar";
+      const pricesHtml = generatePriceTableHtml(item.prices || []);
+      const btnText = item.status === "agotado" ? "Agotado" : (isVendorMode ? "Añadir al Carrito" : "Cotizar");
 
       card.innerHTML = `
         <div class="card-image-container">
@@ -1018,7 +1126,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       const shareBtn = card.querySelector(".share-btn");
       shareBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        
         const pageUrl = "https://gambito404.github.io/MishiStudio/"; 
         const text = `Mira este producto de Mishi Studio: *${item.name}*\n${pageUrl}#${productId}`;
         const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -1029,7 +1136,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       favBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const index = favorites.indexOf(item.name);
-        
         if (index === -1) {
           favorites.push(item.name);
           favBtn.classList.add("active");
@@ -1045,10 +1151,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
 
       const contactBtn = card.querySelector(".btn-contact");
-      contactBtn.addEventListener("click", () => openModal(item));
+      if (item.status === "agotado") {
+        contactBtn.disabled = true;
+      } else {
+        contactBtn.addEventListener("click", () => openModal(item));
+      }
 
       let currentIndex = 0;
-
       if (images.length > 1) {
         const imgEl = card.querySelector("img.card-image");
         const badgeEl = card.querySelector(".image-badge");
@@ -1057,7 +1166,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         const updateView = () => {
           imgEl.style.opacity = 0;
-
           setTimeout(() => {
             imgEl.src = images[currentIndex];
             badgeEl.textContent = `${currentIndex + 1} / ${images.length}`;
@@ -1078,8 +1186,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
 
-      const imgContainer = card.querySelector(".card-image");
-      imgContainer.addEventListener("click", () => {
+      card.querySelector(".card-image").addEventListener("click", () => {
         openLightbox(images, currentIndex);
       });
 
@@ -1170,59 +1277,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     favItems.forEach(({ item, sectionId }) => {
-      const card = document.createElement("article");
-      card.className = "product-card floating";
-      
-      const images = item.images || (item.image ? [item.image] : []);
-      const mainImage = images.length > 0 ? images[0] : "";
-
-      card.innerHTML = `
-        <div class="card-image-container">
-          <img src="${mainImage}" class="card-image" alt="${item.name}" width="280" height="220" loading="lazy">
-          <button class="share-btn" aria-label="Compartir en WhatsApp">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M13.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5zm-8.5 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm11 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/>
-            </svg>
-          </button>
-          <button class="fav-btn active" aria-label="Quitar de favoritos">♥</button>
-        </div>
-        <div class="card-body">
-          <h3>${item.name}</h3>
-          <p>${item.description}</p>
-          <button class="btn-contact">Cotizar</button>
-        </div>
-      `;
-
-      const shareBtn = card.querySelector(".share-btn");
-      shareBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const productId = item.name.toLowerCase().trim().replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
-        
-        const pageUrl = "https://gambito404.github.io/MishiStudio/";
-        const text = `Mira este producto de Mishi Studio: *${item.name}*\n${pageUrl}#${productId}`;
-        const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-        window.open(url, '_blank');
-      });
-
-      const favBtn = card.querySelector(".fav-btn");
-      favBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const index = favorites.indexOf(item.name);
-        if (index > -1) {
-          favorites.splice(index, 1);
-          localStorage.setItem("mishiFavorites", JSON.stringify(favorites));
-          card.style.opacity = "0";
-          card.style.transform = "scale(0.8)";
-          setTimeout(() => renderFavorites(), 300);
-          showToast(`💔 ${item.name} eliminado`);
-          updateFavBadge(true);
-        }
-      });
-
-      card.querySelector(".btn-contact").addEventListener("click", () => openModal(item));
-      
-      card.querySelector(".card-image").addEventListener("click", () => openLightbox(images, 0));
-
+      const card = createProductCard(item);
+      card.classList.add("floating");
       grid.appendChild(card);
     });
   }
@@ -1234,25 +1290,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   favLi.appendChild(favLink);
   navLinks.appendChild(favLi);
 
-  /* ===== SONIDO POP ===== */
   const playPopSound = () => {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
-    
     const ctx = new AudioContext();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-
     osc.type = 'sine';
     osc.frequency.setValueAtTime(600, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.15);
-
     gain.gain.setValueAtTime(0.1, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-
     osc.connect(gain);
     gain.connect(ctx.destination);
-
     osc.start();
     osc.stop(ctx.currentTime + 0.15);
   };
@@ -1262,10 +1312,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (badge) {
       badge.textContent = favorites.length;
       badge.style.display = favorites.length > 0 ? "inline-flex" : "none";
-      
-      if (favorites.length > 0) {
-        if (playSound) playPopSound();
-      }
+      if (favorites.length > 0 && playSound) playPopSound();
     }
   };
   updateFavBadge(false);
@@ -1284,7 +1331,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* ===== BOTÓN DE INSTALACIÓN PWA ===== */
   const setupInstallButton = () => {
     const installLi = document.createElement("li");
-    installLi.id = "pwa-install-li"; // ID para encontrarlo desde el evento global
+    installLi.id = "pwa-install-li";
     const installBtn = document.createElement("a");
     installBtn.href = "#";
     installBtn.innerHTML = "📲 INSTALAR APP";
@@ -1296,18 +1343,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
-    if (isStandalone) {
-      return;
-    }
-
-    if (isIos) {
-      installLi.style.display = "block";
-    }
-
-    // Si el evento ocurrió antes de llegar aquí, mostramos el botón ahora
-    if (deferredPrompt) {
-      installLi.style.display = "block";
-    }
+    if (isStandalone) return;
+    if (isIos) installLi.style.display = "block";
+    if (deferredPrompt) installLi.style.display = "block";
 
     installBtn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1318,51 +1356,33 @@ document.addEventListener("DOMContentLoaded", async () => {
           deferredPrompt = null;
         });
       } else if (isIos) {
-        alert("Para instalar en iPhone/iPad:\n1. Toca el botón 'Compartir' (cuadrado con flecha hacia arriba) en la barra inferior.\n2. Busca y selecciona la opción 'Agregar al inicio'.");
+        alert("Para instalar en iPhone/iPad:\n1. Toca el botón 'Compartir'.\n2. Selecciona 'Agregar al inicio'.");
       }
     });
 
     window.addEventListener('appinstalled', () => {
       installLi.style.display = "none";
       deferredPrompt = null;
-      console.log("✅ App instalada correctamente");
     });
   };
   setupInstallButton();
 
   /* ===== SCROLL ANIMATIONS ===== */
-  const observerOptions = {
-    threshold: 0.1,
-    rootMargin: "0px 0px -50px 0px"
-  };
-
+  const observerOptions = { threshold: 0.1, rootMargin: "0px 0px -50px 0px" };
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         entry.target.classList.add('is-visible');
-        
-        if (entry.target.classList.contains('product-card')) {
-          setTimeout(() => {
-            entry.target.classList.remove('fade-in-up', 'is-visible');
-            entry.target.classList.add('floating');
-          }, 800);
-        }
       }
     });
   }, observerOptions);
-
   document.querySelectorAll('.fade-in-up').forEach(el => observer.observe(el));
 
   /* ===== SCROLL SPY ===== */
   const sections = document.querySelectorAll("section.catalog-section");
   const navItems = document.querySelectorAll(".nav-links a");
 
-  const spyOptions = {
-    root: null,
-    rootMargin: "-30% 0px -70% 0px",
-    threshold: 0
-  };
-
+  const spyOptions = { root: null, rootMargin: "-30% 0px -70% 0px", threshold: 0 };
   const spyObserver = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (entry.isIntersecting) {
@@ -1373,10 +1393,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }, spyOptions);
-
   sections.forEach((section) => spyObserver.observe(section));
 
-  /* ===== AUTO RELOAD ===== */
+  /* ===== AUTO RELOAD ON SW UPDATE ===== */
   let refreshing = false;
   if (navigator.serviceWorker) {
     navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -1398,105 +1417,112 @@ document.addEventListener("DOMContentLoaded", async () => {
     const docHeight = document.documentElement.scrollHeight;
     const winHeight = window.innerHeight;
     const scrollTop = window.scrollY || document.documentElement.scrollTop;
-    
-    let thumbHeight = Math.max((winHeight / docHeight) * winHeight, 50); 
-    
+    if (docHeight <= winHeight) {
+      scrollTrack.style.display = 'none';
+      return;
+    }
+    scrollTrack.style.display = 'block';
+    let thumbHeight = Math.max((winHeight / docHeight) * winHeight, 50);
     const maxScrollTop = docHeight - winHeight;
     const maxThumbTop = winHeight - thumbHeight;
-    
-    let thumbTop = 0;
-    if (maxScrollTop > 0) {
-        thumbTop = (scrollTop / maxScrollTop) * maxThumbTop;
-    }
-
+    let thumbTop = (scrollTop / maxScrollTop) * maxThumbTop;
     scrollThumb.style.height = `${thumbHeight}px`;
     scrollThumb.style.transform = `translateY(${thumbTop}px)`;
-    
-    scrollTrack.style.display = docHeight <= winHeight ? 'none' : 'block';
   };
 
   window.addEventListener('scroll', updateScrollThumb);
   window.addEventListener('resize', updateScrollThumb);
-  
-  const resizeObserver = new ResizeObserver(() => updateScrollThumb());
+  const resizeObserver = new ResizeObserver(updateScrollThumb);
   resizeObserver.observe(document.body);
 
-  let isDragging = false;
-  let startY = 0;
-  let startScrollTop = 0;
-
+  let isDragging = false, startY = 0, startScrollTop = 0;
   const startDrag = (clientY) => {
     isDragging = true;
     startY = clientY;
     startScrollTop = window.scrollY || document.documentElement.scrollTop;
     document.body.style.userSelect = 'none';
   };
-
   const onDrag = (clientY) => {
     if (!isDragging) return;
-    const winHeight = window.innerHeight;
-    const docHeight = document.documentElement.scrollHeight;
-    const thumbHeight = scrollThumb.offsetHeight;
-    const maxThumbTop = winHeight - thumbHeight;
+    const winHeight = window.innerHeight, docHeight = document.documentElement.scrollHeight;
+    const thumbHeight = scrollThumb.offsetHeight, maxThumbTop = winHeight - thumbHeight;
     const maxScrollTop = docHeight - winHeight;
-
     const deltaY = clientY - startY;
     const scrollDelta = (deltaY / maxThumbTop) * maxScrollTop;
-    
     window.scrollTo(0, startScrollTop + scrollDelta);
   };
-
-  const stopDrag = () => {
-    isDragging = false;
-    document.body.style.userSelect = '';
-  };
+  const stopDrag = () => { isDragging = false; document.body.style.userSelect = ''; };
 
   scrollThumb.addEventListener('mousedown', (e) => startDrag(e.clientY));
   document.addEventListener('mousemove', (e) => onDrag(e.clientY));
   document.addEventListener('mouseup', stopDrag);
-
-  scrollThumb.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    startDrag(e.touches[0].clientY);
-  }, { passive: false });
-  
-  document.addEventListener('touchmove', (e) => {
-    if(isDragging) e.preventDefault();
-    onDrag(e.touches[0].clientY);
-  }, { passive: false });
-  
+  scrollThumb.addEventListener('touchstart', (e) => { e.preventDefault(); startDrag(e.touches[0].clientY); }, { passive: false });
+  document.addEventListener('touchmove', (e) => { if(isDragging) e.preventDefault(); onDrag(e.touches[0].clientY); }, { passive: false });
   document.addEventListener('touchend', stopDrag);
 
-  /* ===== AUTO UPDATE (POLLING 10s) ===== */
-  let updateNotificationShown = false;
+  /* ===== AUTO UPDATE (LIVE) ===== */
+  let updateInterval;
+
+  const updateDOMWithNewCatalog = (newCatalogData) => {
+    const allNewItems = new Map(newCatalogData.flatMap(s => s.items.map(i => [i.id, i])));
+    const allOldItems = new Map(catalog.flatMap(s => s.items.map(i => [i.id, i])));
+    let updatedCount = 0;
+
+    allNewItems.forEach((newItem, newItemId) => {
+      const oldItem = allOldItems.get(newItemId);
+      const existingCard = document.querySelector(`.product-card[data-product-id='${newItemId}']`);
+      
+      if (oldItem && JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+        const newCard = createProductCard(newItem, true); // forceEager para cargar la imagen
+        if (existingCard && existingCard.parentElement) {
+          existingCard.parentElement.replaceChild(newCard, existingCard);
+          newCard.classList.add('card-updated');
+          setTimeout(() => newCard.classList.remove('card-updated'), 1500);
+          updatedCount++;
+        }
+      } else if (!oldItem) {
+          // Lógica para añadir productos nuevos (más complejo, omitido por ahora)
+      }
+    });
+    
+    // Actualizar el catálogo global
+    catalog = newCatalogData;
+    allProductNames = catalog.flatMap(section => section.items.map(item => item.name)); // Actualizar nombres para la búsqueda
+
+    if (updatedCount > 0) {
+        showToast(`🔄 ${updatedCount} producto(s) actualizado(s)`, '🔄');
+    }
+    validateCartPrices();
+  };
 
   const checkForUpdates = async () => {
-    if (updateNotificationShown) return;
-
-    const newCatalog = await loadCatalogData();
-    
-    if (!newCatalog || newCatalog.length === 0) return;
-
-    const currentData = JSON.stringify(catalog);
-    const newData = JSON.stringify(newCatalog);
-
-    if (currentData !== newData) {
-        updateNotificationShown = true;
-        showUpdateNotification();
+    const SHEET_ID = "19AIPO8SiAsRgC16cM37sIWKME3VPxefgFyUskJXX5z8";
+    const VERSION_SHEET = "Version";
+    try {
+      const res = await fetch(`https://opensheet.elk.sh/${SHEET_ID}/${VERSION_SHEET}`, { cache: 'reload' });
+      if (!res.ok) return;
+      const versionData = await res.json();
+      
+      if (versionData.length > 0 && versionData[0].version) {
+          const remoteVersion = versionData[0].version;
+          if (catalogVersion && remoteVersion !== catalogVersion) {
+              if (updateInterval) clearInterval(updateInterval); // Detener para evitar múltiples llamadas
+              
+              const newData = await loadCatalogData();
+              if (newData.version !== catalogVersion) {
+                  updateDOMWithNewCatalog(newData.catalog);
+                  catalogVersion = newData.version; // Actualizar la versión local
+              }
+              // Reiniciar el intervalo después de la actualización
+              updateInterval = setInterval(checkForUpdates, 15000); 
+          }
+      }
+    } catch (error) {
+        console.warn("No se pudo verificar si hay actualizaciones.", error);
     }
   };
 
-  const showUpdateNotification = () => {
-    const notification = document.createElement("div");
-    notification.className = "update-notification";
-    notification.innerHTML = `
-      <span>🔄 Hay nuevos productos o precios disponibles.</span>
-      <button onclick="window.location.reload()">Actualizar</button>
-    `;
-    document.body.appendChild(notification);
-  };
-
-  setInterval(checkForUpdates, 10000);
+  updateInterval = setInterval(checkForUpdates, 15000);
 
   /* ===== DETECCIÓN OFFLINE/ONLINE ===== */
   const offlineOverlay = document.getElementById('offline-overlay');
